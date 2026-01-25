@@ -1,0 +1,35 @@
+{
+  "name": "testomniac_extension",
+  "version": "0.1.0",
+  "description": "AI-powered automated UI testing Chrome extension",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "type-check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.2.1",
+    "@types/chrome": "^0.1.31",
+    "@types/node": "^22.10.7",
+    "@types/react": "^18.2.79",
+    "@types/react-dom": "^18.2.25",
+    "@types/webextension-polyfill": "^0.12.4",
+    "@vitejs/plugin-react": "^4.5.1",
+    "autoprefixer": "^10.4.22",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.18",
+    "typescript": "^5.7.3",
+    "vite": "^5.4.21"
+  },
+  "dependencies": {
+    "@testomniac/lib": "file:../testomniac_lib",
+    "@testomniac/types": "file:../testomniac_types",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^7.13.0",
+    "webextension-polyfill": "^0.12.0",
+    "zustand": "^5.0.3"
+  }
+}
