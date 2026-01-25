@@ -151,11 +151,30 @@ async function getElementsFromPage(tabId: number): Promise<{
 }
 
 /**
+ * Normalize href to create consistent keys
+ * Removes domain, normalizes trailing slashes
+ */
+function normalizeHref(href: string): string {
+  try {
+    // If it's a full URL, extract just the path
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      const url = new URL(href);
+      return url.pathname.replace(/\/$/, '') || '/';
+    }
+    // Relative URL - just normalize trailing slash
+    return href.replace(/\/$/, '') || '/';
+  } catch {
+    return href;
+  }
+}
+
+/**
  * Get a unique key for an element based on its content (not position)
  */
 function getElementKey(el: InteractiveElement): string {
   if (el.type === 'link' && el.href) {
-    return `link:${el.text}|${el.href}`;
+    const normalizedHref = normalizeHref(el.href);
+    return `link:${el.text}|${normalizedHref}`;
   }
   return `${el.type}:${el.text}`;
 }
@@ -453,13 +472,23 @@ async function runTestLoop(): Promise<void> {
         return;
       }
 
-      const element = elements[selectedIndex];
-      const elementKey = getElementKey(element);
+      let element = elements[selectedIndex];
+      let elementKey = getElementKey(element);
       log(`AI picked element ${selectedIndex}: ${element.type} "${element.text}" at (${element.x}, ${element.y})`);
 
-      // Check if AI picked a visited element (it shouldn't, but just in case)
+      // If AI picked a visited element, find the first unvisited one instead
       if (testState.visitedElements.has(elementKey)) {
-        log(`WARNING: AI picked already visited element! Key: ${elementKey}`);
+        log(`AI picked visited element, finding unvisited one...`);
+        const unvisitedElement = elements.find(el => !testState.visitedElements.has(getElementKey(el)));
+        if (!unvisitedElement) {
+          log('No unvisited elements found, stopping');
+          testState.loopInProgress = false;
+          await stopTest();
+          return;
+        }
+        element = unvisitedElement;
+        elementKey = getElementKey(element);
+        log(`Using unvisited element instead: ${element.type} "${element.text}" at (${element.x}, ${element.y})`);
       }
 
       // Mark as visited by content (persists across pages)
