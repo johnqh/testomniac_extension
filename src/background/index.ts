@@ -108,6 +108,8 @@ interface InteractiveElement {
   type: 'link' | 'button' | 'input' | 'select' | 'textarea';
   text: string;
   href?: string;
+  fullHref?: string;  // Full resolved URL for validation
+  styleFingerprint: string;  // For grouping similar elements
   x: number;
   y: number;
   width: number;
@@ -121,6 +123,7 @@ async function getElementsFromPage(tabId: number): Promise<{
   url: string;
   title: string;
   elements: InteractiveElement[];
+  pageContent: string;
   consoleErrors: string[];
   networkErrors: string[];
 } | null> {
@@ -130,6 +133,7 @@ async function getElementsFromPage(tabId: number): Promise<{
       url: string;
       title: string;
       elements: InteractiveElement[];
+      pageContent: string;
       consoleErrors: string[];
       networkErrors: string[];
     };
@@ -139,6 +143,7 @@ async function getElementsFromPage(tabId: number): Promise<{
         url: response.url,
         title: response.title,
         elements: response.elements,
+        pageContent: response.pageContent || response.title,
         consoleErrors: response.consoleErrors,
         networkErrors: response.networkErrors,
       };
@@ -495,11 +500,101 @@ async function runTestLoop(): Promise<void> {
       testState.visitedElements.add(elementKey);
       log(`Marked as visited: ${elementKey}`);
 
+      // Store expected URL before clicking (for links)
+      const expectedUrl = element.fullHref || element.href;
+      if (expectedUrl) {
+        log(`Expected destination: ${expectedUrl}`);
+      }
+
       // Click at the element's coordinates using CDP
       await performRealClick(testState.tabId, element.x, element.y);
 
       log('Click executed, waiting for page...');
       await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Validate navigation result (for links)
+      if (expectedUrl && testState.tabId) {
+        try {
+          const tab = await browser.tabs.get(testState.tabId);
+          const actualUrl = tab.url || '';
+          const expectedPath = normalizeHref(expectedUrl);
+          const actualPath = normalizeHref(actualUrl);
+
+          const urlMatched = expectedPath === actualPath;
+          if (urlMatched) {
+            log(`URL validation PASSED: ${actualPath}`);
+          } else {
+            log(`URL validation: expected ${expectedPath}, got ${actualPath}`);
+          }
+
+          // Get page content for AI validation
+          await new Promise(r => setTimeout(r, 500)); // Wait for content to load
+          const newPageData = await getElementsFromPage(testState.tabId);
+
+          if (newPageData) {
+            // Call AI to validate page content matches element text
+            try {
+              const validationResponse = await fetch(`${API_BASE_URL}/ai/validate-page`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  elementText: element.text,
+                  expectedUrl,
+                  actualUrl,
+                  pageTitle: newPageData.title,
+                  pageContent: newPageData.pageContent,
+                }),
+              });
+
+              if (validationResponse.ok) {
+                const validationData = await validationResponse.json();
+                if (validationData.success) {
+                  const { relevant, summary, confidence } = validationData.data;
+                  log(`AI validation: relevant=${relevant}, confidence=${confidence.toFixed(2)}`);
+                  log(`Page summary: ${summary}`);
+
+                  // Store element record
+                  try {
+                    await fetch(`${API_BASE_URL}/elements`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        appId: new URL(url).hostname,
+                        pageUrl: url,
+                        elementKey,
+                        expectedUrl,
+                        styleFingerprint: element.styleFingerprint,
+                        verified: urlMatched && relevant,
+                      }),
+                    });
+
+                    // Store navigation result
+                    await fetch(`${API_BASE_URL}/elements/navigation-results`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        elementId: elementKey,
+                        actualUrl,
+                        expectedUrl,
+                        matched: urlMatched,
+                        aiValidation: { relevant, summary, confidence },
+                      }),
+                    });
+                    log('Element and navigation result stored');
+                  } catch (storeErr) {
+                    log(`Failed to store element: ${storeErr}`);
+                  }
+                }
+              }
+            } catch (validationErr) {
+              log(`AI validation failed: ${validationErr}`);
+            }
+          }
+        } catch (e) {
+          log(`Could not validate URL: ${e}`);
+        }
+      }
+
       testState.loopInProgress = false;
       runTestLoop();
 
