@@ -117,7 +117,7 @@ Simple UI with:
 
 ## Gotchas
 
-- **API_BASE_URL hardcoded to localhost:3001**: `API_BASE_URL` is set to `http://localhost:3001/api/v1`. This only works when the API server is running locally. There is no configuration UI for changing it.
+- **API_BASE_URL hardcoded to localhost:3001**: `API_BASE_URL` is set to `http://localhost:3001/api/v1`, but `testomniac_api` defaults to port `8022`. This port mismatch must be resolved manually in `background/index.ts`. There is no configuration UI for changing it.
 - **Does NOT use @testomniac/client**: Despite the client SDK existing, this extension makes raw `fetch` calls. If the API contract changes, both the client SDK AND the extension's fetch calls must be updated separately.
 - **Elements tracked by content key, not position**: If you try to identify elements by index or DOM position, it will break. The system uses `"type:text|href"` content keys and style fingerprints for stable tracking across page changes.
 - **Max 50 log entries in popup**: The popup log display is capped at 50 entries. Older entries are dropped. Do not rely on the popup for complete test history.
@@ -125,11 +125,9 @@ Simple UI with:
 - **Zustand v5 vs v4.5**: This extension uses Zustand 5, while `@testomniac/lib` uses Zustand 4.5. Do not copy store patterns between the two without accounting for API differences (`createStore` vs `create`, different middleware signatures).
 - **Network guard monkey-patches fetch/XHR**: `networkGuard.ts` overrides `window.fetch` and `XMLHttpRequest` in the content script context. This can interfere with the page being tested if not handled carefully.
 
-## Testing
+## Testing Notes
 
-- **No test suite currently exists**. There are no unit or integration tests.
-- If adding tests, use Vitest to stay consistent with other testomniac packages.
-- Background service worker logic is the highest priority for testing but is difficult to test due to Chrome API dependencies. Consider extracting pure logic functions from `background/index.ts` into testable modules.
-- Content script element extraction logic can be tested by mocking DOM structures.
-- Mock `chrome.debugger`, `chrome.tabs`, and `chrome.scripting` APIs using libraries like `jest-chrome` or manual mocks.
-- The popup React components can be tested with React Testing Library.
+- No test suite currently exists
+- If adding tests, use Vitest to stay consistent with other testomniac packages
+- Consider extracting pure logic from `background/index.ts` into testable modules
+- Mock `chrome.debugger`, `chrome.tabs`, and `chrome.scripting` APIs using `jest-chrome` or manual mocks
