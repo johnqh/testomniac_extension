@@ -6,7 +6,8 @@
  */
 
 const GUARD_WORKER_URL =
-  import.meta.env.VITE_GUARD_WORKER_URL || 'https://guard-worker.testomniac.workers.dev';
+  import.meta.env.VITE_GUARD_WORKER_URL ||
+  'https://guard-worker.testomniac.workers.dev';
 
 const APP_NAME = 'testomniac_extension';
 
@@ -39,7 +40,7 @@ interface SecurityAlert {
 
 function isAllowedHost(hostname: string): boolean {
   return ALLOWED_DOMAINS.some(
-    (domain) => hostname === domain || hostname.endsWith(`.${domain}`)
+    domain => hostname === domain || hostname.endsWith(`.${domain}`)
   );
 }
 
@@ -89,12 +90,13 @@ function handleUnauthorizedCall(
   url: string,
   hostname: string
 ): void {
-  const alertType = type === 'fetch' ? 'unauthorized_fetch' : 'unauthorized_xhr';
+  const alertType =
+    type === 'fetch' ? 'unauthorized_fetch' : 'unauthorized_xhr';
 
-  console.warn(
-    `[NetworkGuard] Unauthorized ${type.toUpperCase()} to:`,
-    { url, hostname }
-  );
+  console.warn(`[NetworkGuard] Unauthorized ${type.toUpperCase()} to:`, {
+    url,
+    hostname,
+  });
 
   reportViolation(createAlert(alertType, url, hostname));
 }
@@ -141,7 +143,10 @@ export function initNetworkGuard(): void {
       ): void {
         try {
           const urlString = url.toString();
-          const parsedUrl = new URL(urlString, globalThis.location?.href || undefined);
+          const parsedUrl = new URL(
+            urlString,
+            globalThis.location?.href || undefined
+          );
           const hostname = parsedUrl.hostname;
 
           if (!isAllowedHost(hostname)) {
@@ -151,7 +156,13 @@ export function initNetworkGuard(): void {
           console.warn('[NetworkGuard] Failed to parse XHR URL:', error);
         }
 
-        super.open(method, url, async, username ?? undefined, password ?? undefined);
+        super.open(
+          method,
+          url,
+          async,
+          username ?? undefined,
+          password ?? undefined
+        );
       }
     } as typeof XMLHttpRequest;
 

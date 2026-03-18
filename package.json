@@ -7,7 +7,11 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --ext ts,tsx --ignore-pattern dist --ignore-pattern node_modules --report-unused-disable-directives --max-warnings 0",
+    "lint:fix": "eslint . --ext ts,tsx --ignore-pattern dist --ignore-pattern node_modules --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,json}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json}\""
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.2.1",
@@ -21,7 +25,16 @@
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.18",
     "typescript": "^5.7.3",
-    "vite": "^5.4.21"
+    "vite": "^5.4.21",
+    "@eslint/js": "^9.38.0",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "eslint": "^9.38.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react-hooks": "^7.0.0",
+    "eslint-plugin-react-refresh": "^0.4.0",
+    "prettier": "^3.6.2"
   },
   "dependencies": {
     "@testomniac/lib": "file:../testomniac_lib",

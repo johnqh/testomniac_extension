@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment files
+.env.local
+.env.*.local
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# OS files
+.DS_Store
+.env
+.env.merged

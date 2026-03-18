@@ -18,24 +18,28 @@ const networkErrors: string[] = [];
 // Override console.error to capture errors
 const originalConsoleError = console.error;
 console.error = (...args: unknown[]) => {
-  const errorMessage = args.map(arg =>
-    typeof arg === 'object' ? JSON.stringify(arg) : String(arg)
-  ).join(' ');
+  const errorMessage = args
+    .map(arg => (typeof arg === 'object' ? JSON.stringify(arg) : String(arg)))
+    .join(' ');
   consoleErrors.push(errorMessage);
   originalConsoleError.apply(console, args);
 };
 
 // Listen for network errors
-window.addEventListener('error', (event) => {
-  if (event.target instanceof HTMLImageElement ||
-      event.target instanceof HTMLScriptElement ||
-      event.target instanceof HTMLLinkElement) {
-    networkErrors.push(`Failed to load: ${(event.target as HTMLImageElement).src || (event.target as HTMLLinkElement).href}`);
+window.addEventListener('error', event => {
+  if (
+    event.target instanceof HTMLImageElement ||
+    event.target instanceof HTMLScriptElement ||
+    event.target instanceof HTMLLinkElement
+  ) {
+    networkErrors.push(
+      `Failed to load: ${(event.target as HTMLImageElement).src || (event.target as HTMLLinkElement).href}`
+    );
   }
 });
 
 // Listen for unhandled promise rejections
-window.addEventListener('unhandledrejection', (event) => {
+window.addEventListener('unhandledrejection', event => {
   consoleErrors.push(`Unhandled rejection: ${event.reason}`);
 });
 
@@ -47,8 +51,8 @@ interface InteractiveElement {
   type: 'link' | 'button' | 'input' | 'select' | 'textarea';
   text: string;
   href?: string;
-  fullHref?: string;  // Full resolved URL for validation
-  styleFingerprint: string;  // For grouping similar elements
+  fullHref?: string; // Full resolved URL for validation
+  styleFingerprint: string; // For grouping similar elements
   x: number;
   y: number;
   width: number;
@@ -67,8 +71,13 @@ function getStyleFingerprint(el: Element): string {
   let parent = el.parentElement;
   for (let i = 0; i < 3 && parent; i++) {
     const parentTag = parent.tagName.toLowerCase();
-    const parentClasses = Array.from(parent.classList).sort().slice(0, 3).join('.');
-    parentPath.push(parentClasses ? `${parentTag}.${parentClasses}` : parentTag);
+    const parentClasses = Array.from(parent.classList)
+      .sort()
+      .slice(0, 3)
+      .join('.');
+    parentPath.push(
+      parentClasses ? `${parentTag}.${parentClasses}` : parentTag
+    );
     parent = parent.parentElement;
   }
 
@@ -103,28 +112,33 @@ function getPageTextContent(): string {
   }
 
   // Get headings
-  document.querySelectorAll('h1, h2, h3').forEach((h) => {
+  document.querySelectorAll('h1, h2, h3').forEach(h => {
     const text = h.textContent?.trim().replace(/\s+/g, ' ');
     if (text && text.length > 2) {
-      const level = h.tagName === 'H1' ? '#' : h.tagName === 'H2' ? '##' : '###';
+      const level =
+        h.tagName === 'H1' ? '#' : h.tagName === 'H2' ? '##' : '###';
       lines.push(`${level} ${text}`);
     }
   });
 
   // Get main content paragraphs (limit to first 10)
   let pCount = 0;
-  document.querySelectorAll('main p, article p, [role="main"] p, .content p, #content p').forEach((p) => {
-    if (pCount >= 10) return;
-    const text = p.textContent?.trim().replace(/\s+/g, ' ');
-    if (text && text.length > 20) {
-      lines.push(text);
-      pCount++;
-    }
-  });
+  document
+    .querySelectorAll(
+      'main p, article p, [role="main"] p, .content p, #content p'
+    )
+    .forEach(p => {
+      if (pCount >= 10) return;
+      const text = p.textContent?.trim().replace(/\s+/g, ' ');
+      if (text && text.length > 20) {
+        lines.push(text);
+        pCount++;
+      }
+    });
 
   // If no main content found, try body paragraphs
   if (pCount === 0) {
-    document.querySelectorAll('body p').forEach((p) => {
+    document.querySelectorAll('body p').forEach(p => {
       if (pCount >= 10) return;
       const text = p.textContent?.trim().replace(/\s+/g, ' ');
       if (text && text.length > 20) {
@@ -136,7 +150,7 @@ function getPageTextContent(): string {
 
   // Get navigation links for context
   const navLinks: string[] = [];
-  document.querySelectorAll('nav a, header a').forEach((a) => {
+  document.querySelectorAll('nav a, header a').forEach(a => {
     const text = a.textContent?.trim();
     if (text && text.length > 1 && text.length < 30 && navLinks.length < 10) {
       navLinks.push(text);
@@ -164,11 +178,20 @@ function getInteractiveElements(): InteractiveElement[] {
   // Helper to check if element is visible
   function isVisible(el: Element): boolean {
     const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
+    if (
+      style.display === 'none' ||
+      style.visibility === 'hidden' ||
+      style.opacity === '0'
+    ) {
       return false;
     }
     const rect = el.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0 && rect.top < window.innerHeight && rect.bottom > 0;
+    return (
+      rect.width > 0 &&
+      rect.height > 0 &&
+      rect.top < window.innerHeight &&
+      rect.bottom > 0
+    );
   }
 
   // Helper to get clean text
@@ -178,7 +201,7 @@ function getInteractiveElements(): InteractiveElement[] {
   }
 
   // Extract links (most important for navigation)
-  document.querySelectorAll('a[href]').forEach((el) => {
+  document.querySelectorAll('a[href]').forEach(el => {
     if (!isVisible(el) || elements.length >= 30) return;
     const href = el.getAttribute('href') || '';
     if (!href || href === '#' || href.startsWith('javascript:')) return;
@@ -204,45 +227,56 @@ function getInteractiveElements(): InteractiveElement[] {
   });
 
   // Extract buttons
-  document.querySelectorAll('button, input[type="button"], input[type="submit"]').forEach((el) => {
-    if (!isVisible(el) || elements.length >= 40) return;
+  document
+    .querySelectorAll('button, input[type="button"], input[type="submit"]')
+    .forEach(el => {
+      if (!isVisible(el) || elements.length >= 40) return;
 
-    const rect = el.getBoundingClientRect();
-    const text = getText(el) || (el as HTMLInputElement).value || 'Button';
+      const rect = el.getBoundingClientRect();
+      const text = getText(el) || (el as HTMLInputElement).value || 'Button';
 
-    elements.push({
-      index: index++,
-      type: 'button',
-      text,
-      styleFingerprint: getStyleFingerprint(el),
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
+      elements.push({
+        index: index++,
+        type: 'button',
+        text,
+        styleFingerprint: getStyleFingerprint(el),
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
     });
-  });
 
   // Extract form inputs
-  document.querySelectorAll('input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select').forEach((el) => {
-    if (!isVisible(el) || elements.length >= 50) return;
+  document
+    .querySelectorAll(
+      'input:not([type="hidden"]):not([type="button"]):not([type="submit"]), textarea, select'
+    )
+    .forEach(el => {
+      if (!isVisible(el) || elements.length >= 50) return;
 
-    const rect = el.getBoundingClientRect();
-    const inputEl = el as HTMLInputElement;
-    const type = inputEl.type || el.tagName.toLowerCase();
-    const placeholder = inputEl.placeholder || '';
-    const name = inputEl.name || '';
+      const rect = el.getBoundingClientRect();
+      const inputEl = el as HTMLInputElement;
+      const type = inputEl.type || el.tagName.toLowerCase();
+      const placeholder = inputEl.placeholder || '';
+      const name = inputEl.name || '';
 
-    elements.push({
-      index: index++,
-      type: el.tagName.toLowerCase() === 'select' ? 'select' : el.tagName.toLowerCase() === 'textarea' ? 'textarea' : 'input',
-      text: placeholder || name || type,
-      styleFingerprint: getStyleFingerprint(el),
-      x: Math.round(rect.left + rect.width / 2),
-      y: Math.round(rect.top + rect.height / 2),
-      width: Math.round(rect.width),
-      height: Math.round(rect.height),
+      elements.push({
+        index: index++,
+        type:
+          el.tagName.toLowerCase() === 'select'
+            ? 'select'
+            : el.tagName.toLowerCase() === 'textarea'
+              ? 'textarea'
+              : 'input',
+        text: placeholder || name || type,
+        styleFingerprint: getStyleFingerprint(el),
+        x: Math.round(rect.left + rect.width / 2),
+        y: Math.round(rect.top + rect.height / 2),
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
     });
-  });
 
   console.log(`[Testomniac] Found ${elements.length} interactive elements`);
   return elements;

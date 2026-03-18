@@ -64,7 +64,7 @@ function log(message: string): void {
  * Wait for tab to finish loading
  */
 function waitForTabLoad(tabId: number): Promise<void> {
-  return new Promise((resolve) => {
+  return new Promise(resolve => {
     const checkTab = async () => {
       try {
         const tab = await browser.tabs.get(tabId);
@@ -87,11 +87,11 @@ function waitForTabLoad(tabId: number): Promise<void> {
 async function captureScreenshot(tabId: number): Promise<string | null> {
   try {
     await chrome.debugger.attach({ tabId }, '1.3');
-    const result = await chrome.debugger.sendCommand(
+    const result = (await chrome.debugger.sendCommand(
       { tabId },
       'Page.captureScreenshot',
       { format: 'png', quality: 80 }
-    ) as { data: string };
+    )) as { data: string };
     await chrome.debugger.detach({ tabId });
     return result.data;
   } catch (error) {
@@ -108,8 +108,8 @@ interface InteractiveElement {
   type: 'link' | 'button' | 'input' | 'select' | 'textarea';
   text: string;
   href?: string;
-  fullHref?: string;  // Full resolved URL for validation
-  styleFingerprint: string;  // For grouping similar elements
+  fullHref?: string; // Full resolved URL for validation
+  styleFingerprint: string; // For grouping similar elements
   x: number;
   y: number;
   width: number;
@@ -128,7 +128,9 @@ async function getElementsFromPage(tabId: number): Promise<{
   networkErrors: string[];
 } | null> {
   try {
-    const response = await browser.tabs.sendMessage(tabId, { type: 'GET_ELEMENTS' }) as {
+    const response = (await browser.tabs.sendMessage(tabId, {
+      type: 'GET_ELEMENTS',
+    })) as {
       success: boolean;
       url: string;
       title: string;
@@ -196,17 +198,19 @@ async function pickElementViaAPI(
   log('Calling API to pick element...');
 
   // Format elements for AI - mark visited ones based on content
-  const elementDescriptions = elements.map((el, i) => {
-    const key = getElementKey(el);
-    const visited = testState.visitedElements.has(key) ? ' [VISITED]' : '';
-    if (el.type === 'link') {
-      return `${i}: [LINK] "${el.text}" -> ${el.href || '?'}${visited}`;
-    } else if (el.type === 'button') {
-      return `${i}: [BUTTON] "${el.text}"${visited}`;
-    } else {
-      return `${i}: [${el.type.toUpperCase()}] "${el.text}"${visited}`;
-    }
-  }).join('\n');
+  const elementDescriptions = elements
+    .map((el, i) => {
+      const key = getElementKey(el);
+      const visited = testState.visitedElements.has(key) ? ' [VISITED]' : '';
+      if (el.type === 'link') {
+        return `${i}: [LINK] "${el.text}" -> ${el.href || '?'}${visited}`;
+      } else if (el.type === 'button') {
+        return `${i}: [BUTTON] "${el.text}"${visited}`;
+      } else {
+        return `${i}: [${el.type.toUpperCase()}] "${el.text}"${visited}`;
+      }
+    })
+    .join('\n');
 
   const response = await fetch(`${API_BASE_URL}/ai/pick-element`, {
     method: 'POST',
@@ -235,7 +239,11 @@ async function pickElementViaAPI(
  * Perform a real mouse click using Chrome DevTools Protocol
  * This creates trusted events that websites can't distinguish from real user input
  */
-async function performRealClick(tabId: number, x: number, y: number): Promise<void> {
+async function performRealClick(
+  tabId: number,
+  x: number,
+  y: number
+): Promise<void> {
   log(`performRealClick at (${x}, ${y})`);
 
   try {
@@ -282,7 +290,9 @@ async function performRealClick(tabId: number, x: number, y: number): Promise<vo
     log(`Debugger error: ${error}`);
     try {
       await chrome.debugger.detach({ tabId });
-    } catch {}
+    } catch {
+      // Ignore detach errors
+    }
     throw error;
   }
 }
@@ -293,7 +303,9 @@ async function performRealClick(tabId: number, x: number, y: number): Promise<vo
 async function injectContentScript(tabId: number): Promise<boolean> {
   try {
     // Check if content script is already injected
-    const response = await browser.tabs.sendMessage(tabId, { type: 'PING' }).catch(() => null) as { pong?: boolean } | null;
+    const response = (await browser.tabs
+      .sendMessage(tabId, { type: 'PING' })
+      .catch(() => null)) as { pong?: boolean } | null;
     if (response?.pong) {
       return true;
     }
@@ -455,7 +467,9 @@ async function runTestLoop(): Promise<void> {
     testState.currentStep++;
 
     // Count unvisited elements (based on content, not position)
-    const unvisitedCount = elements.filter(el => !testState.visitedElements.has(getElementKey(el))).length;
+    const unvisitedCount = elements.filter(
+      el => !testState.visitedElements.has(getElementKey(el))
+    ).length;
     log(`Unvisited elements: ${unvisitedCount}/${elements.length}`);
 
     // If no elements or all visited, stop
@@ -470,7 +484,11 @@ async function runTestLoop(): Promise<void> {
     try {
       const selectedIndex = await pickElementViaAPI(elements, url, title);
 
-      if (selectedIndex === null || selectedIndex < 0 || selectedIndex >= elements.length) {
+      if (
+        selectedIndex === null ||
+        selectedIndex < 0 ||
+        selectedIndex >= elements.length
+      ) {
         log('AI returned invalid index, stopping');
         testState.loopInProgress = false;
         await stopTest();
@@ -479,12 +497,16 @@ async function runTestLoop(): Promise<void> {
 
       let element = elements[selectedIndex];
       let elementKey = getElementKey(element);
-      log(`AI picked element ${selectedIndex}: ${element.type} "${element.text}" at (${element.x}, ${element.y})`);
+      log(
+        `AI picked element ${selectedIndex}: ${element.type} "${element.text}" at (${element.x}, ${element.y})`
+      );
 
       // If AI picked a visited element, find the first unvisited one instead
       if (testState.visitedElements.has(elementKey)) {
         log(`AI picked visited element, finding unvisited one...`);
-        const unvisitedElement = elements.find(el => !testState.visitedElements.has(getElementKey(el)));
+        const unvisitedElement = elements.find(
+          el => !testState.visitedElements.has(getElementKey(el))
+        );
         if (!unvisitedElement) {
           log('No unvisited elements found, stopping');
           testState.loopInProgress = false;
@@ -493,7 +515,9 @@ async function runTestLoop(): Promise<void> {
         }
         element = unvisitedElement;
         elementKey = getElementKey(element);
-        log(`Using unvisited element instead: ${element.type} "${element.text}" at (${element.x}, ${element.y})`);
+        log(
+          `Using unvisited element instead: ${element.type} "${element.text}" at (${element.x}, ${element.y})`
+        );
       }
 
       // Mark as visited by content (persists across pages)
@@ -534,23 +558,28 @@ async function runTestLoop(): Promise<void> {
           if (newPageData) {
             // Call AI to validate page content matches element text
             try {
-              const validationResponse = await fetch(`${API_BASE_URL}/ai/validate-page`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  elementText: element.text,
-                  expectedUrl,
-                  actualUrl,
-                  pageTitle: newPageData.title,
-                  pageContent: newPageData.pageContent,
-                }),
-              });
+              const validationResponse = await fetch(
+                `${API_BASE_URL}/ai/validate-page`,
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    elementText: element.text,
+                    expectedUrl,
+                    actualUrl,
+                    pageTitle: newPageData.title,
+                    pageContent: newPageData.pageContent,
+                  }),
+                }
+              );
 
               if (validationResponse.ok) {
                 const validationData = await validationResponse.json();
                 if (validationData.success) {
                   const { relevant, summary, confidence } = validationData.data;
-                  log(`AI validation: relevant=${relevant}, confidence=${confidence.toFixed(2)}`);
+                  log(
+                    `AI validation: relevant=${relevant}, confidence=${confidence.toFixed(2)}`
+                  );
                   log(`Page summary: ${summary}`);
 
                   // Store element record
@@ -597,13 +626,11 @@ async function runTestLoop(): Promise<void> {
 
       testState.loopInProgress = false;
       runTestLoop();
-
     } catch (error) {
       log(`AI pick failed: ${error}`);
       testState.loopInProgress = false;
       await stopTest();
     }
-
   } catch (error) {
     log(`Test loop error: ${error}`);
     if (testState.isRunning) {
@@ -673,7 +700,9 @@ async function stopTest(): Promise<TestRun | null> {
 
   const completedRun = { ...testState.currentTestRun };
 
-  log(`Test completed: ${completedRun.steps.length} steps, ${completedRun.issues.length} issues`);
+  log(
+    `Test completed: ${completedRun.steps.length} steps, ${completedRun.issues.length} issues`
+  );
 
   testState.isRunning = false;
   testState.currentTestRun = null;
@@ -699,49 +728,54 @@ interface BackgroundMessage {
 }
 
 // Message listener
-browser.runtime.onMessage.addListener(async (message: unknown, _sender: Runtime.MessageSender) => {
-  const msg = message as BackgroundMessage;
+browser.runtime.onMessage.addListener(
+  async (message: unknown, _sender: Runtime.MessageSender) => {
+    const msg = message as BackgroundMessage;
 
-  if (msg.type === 'PING') {
-    return { pong: true };
-  }
+    if (msg.type === 'PING') {
+      return { pong: true };
+    }
 
-  log(`Received: ${msg.type}`);
+    log(`Received: ${msg.type}`);
 
-  switch (msg.type) {
-    case MessageType.START_TEST:
-      if (msg.payload?.url) {
-        await startTest(msg.payload.url, msg.payload.configId);
+    switch (msg.type) {
+      case MessageType.START_TEST:
+        if (msg.payload?.url) {
+          await startTest(msg.payload.url, msg.payload.configId);
+        }
+        return { success: true };
+
+      case MessageType.STOP_TEST: {
+        const result = await stopTest();
+        return { success: true, testRun: result };
       }
-      return { success: true };
 
-    case MessageType.STOP_TEST:
-      const result = await stopTest();
-      return { success: true, testRun: result };
+      case MessageType.TEST_STATUS:
+        return {
+          isRunning: testState.isRunning,
+          currentTestRun: testState.currentTestRun,
+          currentStep: testState.currentStep,
+          logs: testState.logs,
+        };
 
-    case MessageType.TEST_STATUS:
-      return {
-        isRunning: testState.isRunning,
-        currentTestRun: testState.currentTestRun,
-        currentStep: testState.currentStep,
-        logs: testState.logs,
-      };
-
-    default:
-      return { success: true };
+      default:
+        return { success: true };
+    }
   }
-});
+);
 
 // Extension install event
-browser.runtime.onInstalled.addListener((details: Runtime.OnInstalledDetailsType) => {
-  log(`Extension installed: ${details.reason}`);
-});
+browser.runtime.onInstalled.addListener(
+  (details: Runtime.OnInstalledDetailsType) => {
+    log(`Extension installed: ${details.reason}`);
+  }
+);
 
 // Handle tab updates (navigation) during tests
 // Note: The test loop handles page changes internally via polling
 
 // Handle tab close during tests
-browser.tabs.onRemoved.addListener((tabId) => {
+browser.tabs.onRemoved.addListener(tabId => {
   if (tabId === testState.tabId && testState.isRunning) {
     log('Test tab closed, stopping test');
     stopTest();

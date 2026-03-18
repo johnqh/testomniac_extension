@@ -9,9 +9,10 @@ export default defineConfig(({ mode }) => {
 
   // Add dev CSP rules for Vite HMR
   const baseCsp = manifest.content_security_policy.extension_pages;
-  const devCsp = mode === 'development'
-    ? baseCsp + ' ws://localhost:* http://localhost:*'
-    : baseCsp;
+  const devCsp =
+    mode === 'development'
+      ? baseCsp + ' ws://localhost:* http://localhost:*'
+      : baseCsp;
 
   const dynamicManifest = {
     ...manifest,
@@ -53,10 +54,16 @@ export default defineConfig(({ mode }) => {
         },
         output: {
           manualChunks(id) {
-            if (id.includes('react/jsx-runtime') || id.includes('react/jsx-dev-runtime')) {
+            if (
+              id.includes('react/jsx-runtime') ||
+              id.includes('react/jsx-dev-runtime')
+            ) {
               return 'jsx-runtime';
             }
-            if (id.includes('node_modules/react') || id.includes('node_modules/react-dom')) {
+            if (
+              id.includes('node_modules/react') ||
+              id.includes('node_modules/react-dom')
+            ) {
               return 'react-vendor';
             }
           },
