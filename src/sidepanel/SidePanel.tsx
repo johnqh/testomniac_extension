@@ -1,6 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useAuthStatus } from '@sudobility/auth-components';
+import { getFirebaseAuth } from '@sudobility/auth_lib';
+import {
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from 'firebase/auth';
+import { LoginPage } from '@sudobility/building_blocks';
+import { useAuthTokenSync } from './hooks/useAuthTokenSync';
 
-const API_URL = 'http://localhost:8027';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
 interface ScanProgress {
   phase: string;
@@ -27,6 +37,8 @@ const initialProgress: ScanProgress = {
 };
 
 export function SidePanel() {
+  const { user, isAuthenticated, loading, signOut } = useAuthStatus();
+  const token = useAuthTokenSync();
   const [activeTabUrl, setActiveTabUrl] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -76,7 +88,10 @@ export function SidePanel() {
     try {
       const response = await fetch(`${API_URL}/api/v1/scan`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ url: activeTabUrl }),
       });
       const data = await response.json();
@@ -102,7 +117,7 @@ export function SidePanel() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeTabUrl]);
+  }, [activeTabUrl, token]);
 
   // Auto-scroll event log to bottom
   useEffect(() => {
@@ -146,11 +161,57 @@ export function SidePanel() {
 
   const currentPhaseIndex = phases.findIndex(p => p.key === progress.phase);
 
+  if (loading) {
+    return (
+      <div className='p-3 text-sm text-gray-500 flex items-center justify-center h-32'>
+        Loading...
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    const auth = getFirebaseAuth();
+    if (!auth) {
+      return (
+        <div className='p-3 text-sm text-red-600'>Firebase not configured</div>
+      );
+    }
+    return (
+      <LoginPage
+        appName='Testomniac'
+        className='!min-h-0 !pt-4 !pb-4'
+        onEmailSignIn={async (email, password) => {
+          await signInWithEmailAndPassword(auth, email, password);
+        }}
+        onEmailSignUp={async (email, password) => {
+          await createUserWithEmailAndPassword(auth, email, password);
+        }}
+        onGoogleSignIn={async () => {
+          await signInWithPopup(auth, new GoogleAuthProvider());
+        }}
+        onSuccess={() => {}}
+      />
+    );
+  }
+
   return (
     <div className='p-3 space-y-3 text-sm'>
       {/* Header */}
-      <div className='font-semibold text-gray-900 text-base'>
-        Testomniac Scanner
+      <div className='flex items-center justify-between'>
+        <div className='font-semibold text-gray-900 text-base'>
+          Testomniac Scanner
+        </div>
+        <div className='flex items-center gap-2'>
+          <span className='text-xs text-gray-500 truncate max-w-[140px]'>
+            {user?.email}
+          </span>
+          <button
+            onClick={() => signOut()}
+            className='text-xs text-gray-400 hover:text-gray-600'
+          >
+            Sign out
+          </button>
+        </div>
       </div>
 
       {/* Test Current Page Button */}

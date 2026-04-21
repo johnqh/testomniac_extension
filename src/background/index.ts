@@ -28,6 +28,7 @@ LOG('Background service worker starting...');
 // Config — loaded from chrome.storage.local
 let apiUrl = 'http://localhost:8027';
 let apiKey = '';
+let firebaseToken: string | null = null;
 
 interface ScanState {
   isRunning: boolean;
@@ -105,7 +106,16 @@ async function loadConfig() {
   const stored = await chrome.storage.local.get(['apiUrl', 'apiKey']);
   if (stored.apiUrl) apiUrl = stored.apiUrl as string;
   if (stored.apiKey) apiKey = stored.apiKey as string;
-  LOG('Config loaded:', { apiUrl, hasApiKey: !!apiKey });
+
+  // Load Firebase token from session storage (survives service worker restarts)
+  const session = await chrome.storage.session.get(['firebaseToken']);
+  if (session.firebaseToken) firebaseToken = session.firebaseToken as string;
+
+  LOG('Config loaded:', {
+    apiUrl,
+    hasApiKey: !!apiKey,
+    hasFirebaseToken: !!firebaseToken,
+  });
 }
 
 // ============================================================================
@@ -1333,6 +1343,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   } else if (message.type === 'GET_STATUS') {
     LOG('Status requested');
     sendResponse({ ...scanState });
+  } else if (message.type === 'SET_AUTH_TOKEN') {
+    firebaseToken = (message.token as string) || null;
+    LOG('Firebase token updated:', firebaseToken ? 'present' : 'cleared');
+    sendResponse({ ok: true });
   } else if (message.type === 'SAVE_CONFIG') {
     LOG('Saving config:', {
       apiUrl: message.apiUrl,

@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
         // Shim node:crypto for browser — the extension uses SubtleCrypto directly
         'node:crypto': path.resolve(__dirname, './src/shims/crypto.ts'),
       },
-      dedupe: ['react', 'react-dom'],
+      dedupe: ['react', 'react-dom', 'firebase/app', 'firebase/auth'],
     },
     optimizeDeps: {
       include: [
@@ -51,6 +51,8 @@ export default defineConfig(({ mode }) => {
         'react-dom',
         'react/jsx-runtime',
         'react/jsx-dev-runtime',
+        'firebase/app',
+        'firebase/auth',
       ],
     },
     server: {
@@ -66,6 +68,12 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       rollupOptions: {
+        // Externalize optional dependencies not needed in the extension
+        external: [
+          '@sudobility/subscription_lib',
+          '@sudobility/devops-components',
+          '@sudobility/seo_lib',
+        ],
         input: {
           sidepanel: path.resolve(__dirname, 'src/sidepanel/index.html'),
         },
@@ -82,6 +90,9 @@ export default defineConfig(({ mode }) => {
               id.includes('node_modules/react-dom')
             ) {
               return 'react-vendor';
+            }
+            if (id.includes('node_modules/firebase')) {
+              return 'firebase-vendor';
             }
           },
         },
