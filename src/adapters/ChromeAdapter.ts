@@ -27,16 +27,64 @@ export class ChromeAdapter implements BrowserAdapter {
       visible: true,
       timeout: options?.timeout || 5000,
     });
-    if (!found) return;
+    if (!found) throw new Error(`Element not found for click: ${selector}`);
 
-    // Get element coordinates
+    // Scroll into view and choose a point that is actually over the target.
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
       func: (sel: string) => {
-        const el = document.querySelector(sel);
+        const el = document.querySelector(sel) as HTMLElement | null;
         if (!el) return null;
+
+        el.scrollIntoView({
+          block: 'center',
+          inline: 'center',
+          behavior: 'instant',
+        });
+
         const rect = el.getBoundingClientRect();
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        if (rect.width <= 0 || rect.height <= 0) return null;
+
+        const inset = 4;
+        const left = Math.max(rect.left + inset, 0);
+        const right = Math.min(rect.right - inset, window.innerWidth - 1);
+        const top = Math.max(rect.top + inset, 0);
+        const bottom = Math.min(rect.bottom - inset, window.innerHeight - 1);
+        const centerX = Math.min(
+          Math.max(rect.left + rect.width / 2, 0),
+          window.innerWidth - 1
+        );
+        const centerY = Math.min(
+          Math.max(rect.top + rect.height / 2, 0),
+          window.innerHeight - 1
+        );
+
+        const candidates = [
+          { x: centerX, y: centerY },
+          { x: left, y: top },
+          { x: right, y: top },
+          { x: left, y: bottom },
+          { x: right, y: bottom },
+        ];
+
+        for (const point of candidates) {
+          const topEl = document.elementFromPoint(point.x, point.y);
+          if (
+            topEl &&
+            (topEl === el || el.contains(topEl) || topEl.contains(el))
+          ) {
+            return { x: point.x, y: point.y };
+          }
+        }
+
+        return {
+          x: centerX,
+          y: centerY,
+          occludedBy:
+            document
+              .elementFromPoint(centerX, centerY)
+              ?.tagName.toLowerCase() ?? 'unknown',
+        };
       },
       args: [selector],
     });
@@ -44,27 +92,44 @@ export class ChromeAdapter implements BrowserAdapter {
     if (result?.result) {
       const { x, y } = result.result;
       await this.ensureDebugger();
-      // Move mouse to element first (like a real user)
+
+      // Dispatch CDP mouse events (with pointerType for proper click synthesis)
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        { type: 'mouseMoved', x, y }
+        { type: 'mouseMoved', x, y, pointerType: 'mouse' }
       );
       await new Promise(r => setTimeout(r, 50));
-      // Press
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }
+        {
+          type: 'mousePressed',
+          x,
+          y,
+          button: 'left',
+          clickCount: 1,
+          pointerType: 'mouse',
+        }
       );
       await new Promise(r => setTimeout(r, 30));
-      // Release
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }
+        {
+          type: 'mouseReleased',
+          x,
+          y,
+          button: 'left',
+          clickCount: 1,
+          pointerType: 'mouse',
+        }
       );
+
+      return;
     }
+
+    throw new Error(`Could not resolve clickable point for ${selector}`);
   }
 
   async hover(selector: string, options?: { timeout?: number }): Promise<void> {
@@ -72,15 +137,29 @@ export class ChromeAdapter implements BrowserAdapter {
       visible: true,
       timeout: options?.timeout || 5000,
     });
-    if (!found) return;
+    if (!found) throw new Error(`Element not found for hover: ${selector}`);
 
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
       func: (sel: string) => {
-        const el = document.querySelector(sel);
+        const el = document.querySelector(sel) as HTMLElement | null;
         if (!el) return null;
+        el.scrollIntoView({
+          block: 'center',
+          inline: 'center',
+          behavior: 'instant',
+        });
         const rect = el.getBoundingClientRect();
-        return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+        if (rect.width <= 0 || rect.height <= 0) return null;
+        const x = Math.min(
+          Math.max(rect.left + rect.width / 2, 0),
+          window.innerWidth - 1
+        );
+        const y = Math.min(
+          Math.max(rect.top + rect.height / 2, 0),
+          window.innerHeight - 1
+        );
+        return { x, y };
       },
       args: [selector],
     });
@@ -94,7 +173,10 @@ export class ChromeAdapter implements BrowserAdapter {
         'Input.dispatchMouseEvent',
         { type: 'mouseMoved', x, y }
       );
+      return;
     }
+
+    throw new Error(`Could not resolve hover point for ${selector}`);
   }
 
   async type(selector: string, text: string): Promise<void> {
@@ -153,6 +235,8 @@ export class ChromeAdapter implements BrowserAdapter {
     fn: string | ((...args: unknown[]) => T),
     ...args: unknown[]
   ): Promise<T> {
+    const serializedArgs = args.map(arg => (arg === undefined ? null : arg));
+
     if (typeof fn === 'string') {
       const [result] = await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
@@ -163,7 +247,7 @@ export class ChromeAdapter implements BrowserAdapter {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
       func: fn as (...args: unknown[]) => T,
-      args: args,
+      args: serializedArgs,
     });
     return result?.result as T;
   }
@@ -190,7 +274,8 @@ export class ChromeAdapter implements BrowserAdapter {
     type?: string;
     quality?: number;
   }): Promise<Uint8Array> {
-    const dataUrl = await chrome.tabs.captureVisibleTab({
+    const tab = await chrome.tabs.get(this.tabId);
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
       format: (options?.type as 'jpeg' | 'png') || 'jpeg',
       quality: options?.quality || 72,
     });

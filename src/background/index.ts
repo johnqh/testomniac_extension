@@ -717,6 +717,52 @@ async function runScan(url: string, runId: number) {
         `  position: (${Math.round(item.x || 0)}, ${Math.round(item.y || 0)}) ${Math.round(item.width || 0)}x${Math.round(item.height || 0)}`
       );
 
+      // Re-tag the element (page may have reloaded, losing data-tmnc-id)
+      const retagged = await adapter.evaluate(
+        (...args: unknown[]) => {
+          const sel = args[0] as string;
+          const href = args[1] as string | undefined;
+          const text = args[2] as string | undefined;
+          const tag = args[3] as string | undefined;
+          const match = sel.match(/\[data-tmnc-id="([^"]+)"\]/);
+          const uid = match?.[1];
+
+          // First try the original selector
+          const el = document.querySelector(sel);
+          if (el) {
+            if (uid) {
+              el.setAttribute('data-tmnc-id', uid);
+            }
+            return true;
+          }
+
+          // If not found, try to locate by href + text
+          if (uid && href && tag) {
+            const candidates = document.querySelectorAll(tag.toLowerCase());
+            for (const c of candidates) {
+              const cHref =
+                (c as HTMLAnchorElement).href || c.getAttribute('href') || '';
+              const cText = c.textContent?.trim().slice(0, 80) || '';
+              if (cHref === href || (text && cText === text)) {
+                c.setAttribute('data-tmnc-id', uid);
+                return true;
+              }
+            }
+          }
+          return false;
+        },
+        item.selector,
+        item.href,
+        item.textContent,
+        item.tagName
+      );
+
+      if (!retagged) {
+        LOG(`  Element not found on page, skipping`);
+        addEvent('warning', `Element not found: ${itemInfo}`);
+        continue;
+      }
+
       // Mouseover
       try {
         LOG(`  Hovering...`);
@@ -749,7 +795,9 @@ async function runScan(url: string, runId: number) {
         LOG(`  Clicking... (current URL: ${beforeUrl.slice(0, 60)})`);
         addEvent('click', itemInfo);
         await adapter.click(item.selector, { timeout: 3000 });
-        LOG(`  Click done, waiting ${POST_ACTION_SETTLE_MS}ms...`);
+        LOG(`  Click done, waiting for page to settle...`);
+        // Wait for potential navigation to complete
+        await adapter.waitForNavigation({ timeout: 3000 }).catch(() => {});
         await new Promise(r => setTimeout(r, POST_ACTION_SETTLE_MS));
 
         const afterUrl = await adapter.getUrl();
