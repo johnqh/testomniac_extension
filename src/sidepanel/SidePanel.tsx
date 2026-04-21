@@ -4,11 +4,10 @@ import { getFirebaseAuth } from '@sudobility/auth_lib';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  GoogleAuthProvider,
-  signInWithPopup,
 } from 'firebase/auth';
 import { LoginPage } from '@sudobility/building_blocks';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
+import { chromeGoogleSignIn } from './auth/googleSignIn';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
@@ -179,7 +178,7 @@ export function SidePanel() {
     return (
       <LoginPage
         appName='Testomniac'
-        className='!min-h-0 !pt-4 !pb-4'
+        className='!min-h-0 !pt-4 !pb-4 !px-3'
         onEmailSignIn={async (email, password) => {
           await signInWithEmailAndPassword(auth, email, password);
         }}
@@ -187,7 +186,7 @@ export function SidePanel() {
           await createUserWithEmailAndPassword(auth, email, password);
         }}
         onGoogleSignIn={async () => {
-          await signInWithPopup(auth, new GoogleAuthProvider());
+          await chromeGoogleSignIn(auth);
         }}
         onSuccess={() => {}}
       />

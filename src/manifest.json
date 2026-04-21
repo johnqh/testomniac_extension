@@ -5,6 +5,7 @@
   "description": "AI-powered automated UI testing extension",
   "minimum_chrome_version": "102",
   "permissions": [
+    "identity",
     "storage",
     "activeTab",
     "scripting",

@@ -18,5 +18,11 @@ export async function initializeApp(): Promise<void> {
       appId: import.meta.env.VITE_FIREBASE_APP_ID,
       measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
     },
+    // Disable analytics, remote config, and messaging — not supported in Chrome extensions
+    firebaseInitOptions: {
+      enableAnalytics: false,
+      enableRemoteConfig: false,
+      enableMessaging: false,
+    },
   });
 }
