@@ -15,9 +15,7 @@
   "side_panel": {
     "default_path": "src/sidepanel/index.html"
   },
-  "host_permissions": [
-    "<all_urls>"
-  ],
+  "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background/index.ts",
     "type": "module"

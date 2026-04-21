@@ -137,7 +137,9 @@ async function computeHashes(
   html: string,
   actionableItems: ActionableItem[]
 ): Promise<PageHashes> {
-  LOG(`Computing hashes (html: ${html.length} chars, items: ${actionableItems.length})`);
+  LOG(
+    `Computing hashes (html: ${html.length} chars, items: ${actionableItems.length})`
+  );
   const normalized = normalizeHtml(html);
   const visibleText = extractVisibleText(html);
   const visibleKeys = actionableItems
@@ -385,7 +387,12 @@ function detectVisualIssues(html: string): VisualIssue[] {
   while ((imgMatch = imgRegex.exec(html)) !== null) {
     const attrs = imgMatch[1];
     const srcMatch = /src\s*=\s*"([^"]*)"/i.exec(attrs);
-    if (!srcMatch || !srcMatch[1] || srcMatch[1].trim() === '' || srcMatch[1] === '#') {
+    if (
+      !srcMatch ||
+      !srcMatch[1] ||
+      srcMatch[1].trim() === '' ||
+      srcMatch[1] === '#'
+    ) {
       brokenImgCount++;
     }
   }
@@ -456,7 +463,10 @@ function detectContentIssues(text: string): ContentIssue[] {
   const errorPatterns: Array<{ pattern: RegExp; label: string }> = [
     { pattern: /404\s*(not found|error|page)/i, label: '404 Not Found' },
     { pattern: /500\s*(internal|server|error)/i, label: '500 Server Error' },
-    { pattern: /503\s*(service|unavailable)/i, label: '503 Service Unavailable' },
+    {
+      pattern: /503\s*(service|unavailable)/i,
+      label: '503 Service Unavailable',
+    },
     { pattern: /502\s*(bad gateway)/i, label: '502 Bad Gateway' },
     { pattern: /page\s*not\s*found/i, label: 'Page Not Found' },
     { pattern: /server\s*error/i, label: 'Server Error' },
@@ -516,7 +526,9 @@ async function runScan(url: string, runId: number) {
 
   // Immediately claim the run so the server scanner doesn't pick it up
   const api = apiKey ? new ApiClient(apiUrl + '/api/v1/scanner', apiKey) : null;
-  LOG(`API client: ${api ? 'initialized' : 'NO API KEY — running without API'}`);
+  LOG(
+    `API client: ${api ? 'initialized' : 'NO API KEY — running without API'}`
+  );
 
   try {
     // Claim the run immediately by setting phase to mouse_scanning
@@ -587,7 +599,10 @@ async function runScan(url: string, runId: number) {
       api && appId
         ? await api.findOrCreatePage(appId, scanState.currentPageUrl)
         : null;
-    LOG('Page record:', page ? { id: page.id, url: page.url } : 'skipped (no API)');
+    LOG(
+      'Page record:',
+      page ? { id: page.id, url: page.url } : 'skipped (no API)'
+    );
     scanState.pagesFound++;
     addEvent('page_discovered', scanState.currentPageUrl);
 
@@ -643,7 +658,10 @@ async function runScan(url: string, runId: number) {
     const linkResults = await detectBrokenLinks(adapter, url);
     for (const broken of linkResults) {
       scanState.issuesFound++;
-      addEvent('bug', `Broken link: "${broken.text}" → ${broken.href} (${broken.error})`);
+      addEvent(
+        'bug',
+        `Broken link: "${broken.text}" → ${broken.href} (${broken.error})`
+      );
     }
 
     // 2. Visual checks
@@ -654,7 +672,9 @@ async function runScan(url: string, runId: number) {
     }
 
     // 3. Content checks
-    const contentText2 = await adapter.evaluate(() => document.body.innerText || '');
+    const contentText2 = await adapter.evaluate(
+      () => document.body.innerText || ''
+    );
     const contentIssues = detectContentIssues(contentText2 as string);
     for (const issue of contentIssues) {
       scanState.issuesFound++;
@@ -667,7 +687,9 @@ async function runScan(url: string, runId: number) {
     const clickableItems = items.filter(
       i => i.visible && !i.disabled && i.actionKind !== 'fill'
     );
-    LOG(`\n========== SCANNING ${clickableItems.length} CLICKABLE ITEMS ==========`);
+    LOG(
+      `\n========== SCANNING ${clickableItems.length} CLICKABLE ITEMS ==========`
+    );
 
     for (
       let idx = 0;
@@ -691,7 +713,9 @@ async function runScan(url: string, runId: number) {
 
       LOG(`\n--- [${idx + 1}/${clickableItems.length}] ${itemInfo} ---`);
       LOG(`  selector: ${item.selector}`);
-      LOG(`  position: (${Math.round(item.x || 0)}, ${Math.round(item.y || 0)}) ${Math.round(item.width || 0)}x${Math.round(item.height || 0)}`);
+      LOG(
+        `  position: (${Math.round(item.x || 0)}, ${Math.round(item.y || 0)}) ${Math.round(item.width || 0)}x${Math.round(item.height || 0)}`
+      );
 
       // Mouseover
       try {
@@ -773,11 +797,16 @@ async function runScan(url: string, runId: number) {
         scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
 
         // Check if click led to an error page
-        const postClickText = await adapter.evaluate(() => document.body.innerText || '') as string;
+        const postClickText = (await adapter.evaluate(
+          () => document.body.innerText || ''
+        )) as string;
         const postClickIssues = detectContentIssues(postClickText);
         if (postClickIssues.some(i => i.type === 'error_page')) {
           scanState.issuesFound++;
-          addEvent('bug', `Click on "${item.textContent}" led to error page at ${afterUrl}`);
+          addEvent(
+            'bug',
+            `Click on "${item.textContent}" led to error page at ${afterUrl}`
+          );
         }
 
         if (api) {
@@ -844,7 +873,12 @@ async function runScan(url: string, runId: number) {
 // ============================================================================
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  LOG('Message received:', message.type, message.url ? `url=${message.url}` : '', message.runId ? `runId=${message.runId}` : '');
+  LOG(
+    'Message received:',
+    message.type,
+    message.url ? `url=${message.url}` : '',
+    message.runId ? `runId=${message.runId}` : ''
+  );
 
   if (message.type === 'START_SCAN' && message.url && message.runId) {
     LOG('Starting scan...');
@@ -861,7 +895,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     LOG('Status requested');
     sendResponse({ ...scanState });
   } else if (message.type === 'SAVE_CONFIG') {
-    LOG('Saving config:', { apiUrl: message.apiUrl, hasApiKey: !!message.apiKey });
+    LOG('Saving config:', {
+      apiUrl: message.apiUrl,
+      hasApiKey: !!message.apiKey,
+    });
     chrome.storage.local.set({
       apiUrl: message.apiUrl || apiUrl,
       apiKey: message.apiKey || apiKey,
