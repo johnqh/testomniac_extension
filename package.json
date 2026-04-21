@@ -37,7 +37,7 @@
     "prettier": "^3.6.2"
   },
   "dependencies": {
-    "@sudobility/testomniac_scanning_service": "0.0.1",
+    "@sudobility/testomniac_scanning_service": "^0.0.2",
     "@testomniac/lib": "file:../testomniac_lib",
     "@testomniac/types": "file:../testomniac_types",
     "react": "^18.3.1",

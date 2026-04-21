@@ -16,7 +16,7 @@ class BrowserHash {
     return this;
   }
 
-  digest(encoding: "hex"): string {
+  digest(encoding: 'hex'): string {
     // Synchronous fallback: use a simple hash for build compatibility.
     // The extension's own code uses SubtleCrypto (async) for actual hashing.
     // This shim only exists so the unused page-utils code doesn't crash at import time.
@@ -26,8 +26,8 @@ class BrowserHash {
         hash = ((hash << 5) - hash + chunk[i]) | 0;
       }
     }
-    if (encoding === "hex") {
-      return Math.abs(hash).toString(16).padStart(16, "0");
+    if (encoding === 'hex') {
+      return Math.abs(hash).toString(16).padStart(16, '0');
     }
     return String(hash);
   }

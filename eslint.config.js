@@ -64,6 +64,7 @@ export default [
         HTMLAudioElement: 'readonly',
         HTMLVideoElement: 'readonly',
         HTMLTextAreaElement: 'readonly',
+        HTMLSelectElement: 'readonly',
         HTMLCanvasElement: 'readonly',
         Event: 'readonly',
         Element: 'readonly',
@@ -81,6 +82,11 @@ export default [
         // React globals
         React: 'readonly',
         JSX: 'readonly',
+
+        // Encoding/Crypto globals
+        TextEncoder: 'readonly',
+        TextDecoder: 'readonly',
+        crypto: 'readonly',
 
         // Chrome Extension globals
         chrome: 'readonly',
