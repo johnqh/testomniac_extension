@@ -919,6 +919,29 @@ async function runScan(url: string, runId: number) {
       scanState.pageStatesFound++;
       addEvent('state_captured', `${items.length} elements found`);
 
+      // Proactively enqueue pages from extracted navigate-action hrefs
+      // so we don't miss pages we happen not to click.
+      for (const item of items) {
+        if (item.actionKind !== 'navigate' || !item.href) continue;
+        try {
+          const target = new URL(item.href, currentPageUrl);
+          if (target.origin !== startOrigin) continue;
+          // Skip anchors (#), javascript:, and mailto:
+          if (target.protocol !== 'http:' && target.protocol !== 'https:')
+            continue;
+          const normalized = target.href.split('#')[0];
+          if (
+            !visitedPages.has(normalized) &&
+            !pageQueue.includes(target.href)
+          ) {
+            pageQueue.push(target.href);
+          }
+        } catch {
+          // Invalid URL, skip
+        }
+      }
+      LOG(`Page queue after href scan: ${pageQueue.length} pending`);
+
       // === Bug Detection Phase ===
       LOG('Running bug detectors on page...');
 
@@ -1190,6 +1213,29 @@ async function runScan(url: string, runId: number) {
             await dismissModal(adapter);
             LOG(`  Modal dismissed`);
             await new Promise(r => setTimeout(r, 300));
+          }
+
+          // Check if the click opened a new tab (target="_blank" etc.)
+          const allTabs = await chrome.tabs.query({
+            currentWindow: true,
+          });
+          const newTabs = allTabs.filter(
+            t => t.id !== adapter.tabId && t.id !== undefined
+          );
+          // If a new tab appeared and our tab is no longer active, a
+          // target="_blank" link likely opened it. Close the new tab
+          // and re-activate ours.
+          for (const nt of newTabs) {
+            if (nt.active && nt.id !== adapter.tabId && nt.id !== undefined) {
+              LOG(`  New tab opened (${nt.url?.slice(0, 60)}), closing it`);
+              addEvent(
+                'new_tab_closed',
+                `Closed tab: ${nt.url?.slice(0, 60) || 'unknown'}`
+              );
+              await chrome.tabs.remove(nt.id);
+              await chrome.tabs.update(adapter.tabId, { active: true });
+              break;
+            }
           }
 
           const afterUrl = await adapter.getUrl();

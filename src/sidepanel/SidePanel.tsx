@@ -35,6 +35,8 @@ const initialProgress: ScanProgress = {
   events: [],
 };
 
+type ResultTab = 'overview' | 'pages' | 'issues' | 'actions' | 'events';
+
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
@@ -44,6 +46,7 @@ export function SidePanel() {
   const [progress, setProgress] = useState<ScanProgress>(initialProgress);
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
+  const [resultTab, setResultTab] = useState<ResultTab>('overview');
 
   // Get active tab URL
   useEffect(() => {
@@ -279,87 +282,250 @@ export function SidePanel() {
         </div>
       )}
 
-      {/* Counters */}
+      {/* Counters — clickable to switch tabs */}
       {(isScanning || progress.isComplete) && (
-        <div className='grid grid-cols-4 gap-2'>
-          {[
-            {
-              label: 'Pages',
-              value: progress.pagesFound,
-              color: 'text-blue-600',
-            },
-            {
-              label: 'States',
-              value: progress.pageStatesFound,
-              color: 'text-purple-600',
-            },
-            {
-              label: 'Actions',
-              value: progress.actionsCompleted,
-              color: 'text-green-600',
-            },
-            {
-              label: 'Issues',
-              value: progress.issuesFound,
-              color: 'text-red-600',
-            },
-          ].map(c => (
-            <div key={c.label} className='text-center'>
+        <div className='grid grid-cols-4 gap-1'>
+          {(
+            [
+              {
+                key: 'pages',
+                label: 'Pages',
+                value: progress.pagesFound,
+                color: 'text-blue-600',
+                ring: 'ring-blue-300',
+              },
+              {
+                key: 'overview',
+                label: 'States',
+                value: progress.pageStatesFound,
+                color: 'text-purple-600',
+                ring: 'ring-purple-300',
+              },
+              {
+                key: 'actions',
+                label: 'Actions',
+                value: progress.actionsCompleted,
+                color: 'text-green-600',
+                ring: 'ring-green-300',
+              },
+              {
+                key: 'issues',
+                label: 'Issues',
+                value: progress.issuesFound,
+                color: 'text-red-600',
+                ring: 'ring-red-300',
+              },
+            ] as const
+          ).map(c => (
+            <button
+              key={c.key}
+              onClick={() => setResultTab(c.key)}
+              className={`text-center py-1.5 rounded-md transition-colors ${
+                resultTab === c.key
+                  ? `bg-white ring-2 ${c.ring} shadow-sm`
+                  : 'hover:bg-gray-50'
+              }`}
+            >
               <div className={`text-lg font-bold tabular-nums ${c.color}`}>
                 {c.value}
               </div>
               <div className='text-[10px] text-gray-500'>{c.label}</div>
-            </div>
+            </button>
           ))}
         </div>
       )}
 
-      {/* Current Page */}
-      {progress.currentPageUrl && (
-        <div className='rounded-md border border-gray-200 overflow-hidden'>
-          <div className='bg-gray-50 px-2 py-1 border-b border-gray-200 flex items-center justify-between'>
-            <span className='text-[10px] font-medium text-gray-500'>
-              Current Page
-            </span>
-            <span className='text-[10px] font-mono text-gray-400 truncate ml-2 max-w-[200px]'>
-              {progress.currentPageUrl}
-            </span>
-          </div>
-          {progress.latestScreenshotDataUrl && (
-            <img
-              src={progress.latestScreenshotDataUrl}
-              alt='Current page'
-              className='w-full h-auto'
-            />
-          )}
+      {/* Tab bar */}
+      {(isScanning || progress.isComplete) && progress.events.length > 0 && (
+        <div className='flex border-b border-gray-200'>
+          {(
+            [
+              { key: 'overview', label: 'Overview' },
+              { key: 'pages', label: 'Pages' },
+              { key: 'issues', label: 'Issues' },
+              { key: 'actions', label: 'Actions' },
+              { key: 'events', label: 'All Events' },
+            ] as const
+          ).map(tab => (
+            <button
+              key={tab.key}
+              onClick={() => setResultTab(tab.key)}
+              className={`px-2 py-1.5 text-[11px] font-medium border-b-2 transition-colors ${
+                resultTab === tab.key
+                  ? 'border-blue-500 text-blue-600'
+                  : 'border-transparent text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Event Log */}
-      {progress.events.length > 0 && (
+      {/* Tab content */}
+      {(isScanning || progress.isComplete) && (
         <div className='rounded-md border border-gray-200 overflow-hidden'>
-          <div className='bg-gray-50 px-2 py-1 border-b border-gray-200'>
-            <span className='text-[10px] font-medium text-gray-500'>
-              Events ({progress.events.length})
-            </span>
-          </div>
-          <div
-            ref={eventLogRef}
-            className='max-h-[200px] overflow-y-auto font-mono text-[10px]'
-          >
-            {progress.events.slice(-50).map((event, i) => (
-              <div
-                key={i}
-                className='px-2 py-0.5 border-b border-gray-100 last:border-0'
-              >
-                <span className='text-gray-400'>
-                  {new Date(event.timestamp).toLocaleTimeString()}
-                </span>{' '}
-                <span className='text-blue-600'>{event.type}</span>{' '}
-                <span className='text-gray-600'>{event.message}</span>
-              </div>
-            ))}
-          </div>
+          {/* Overview tab */}
+          {resultTab === 'overview' && (
+            <>
+              {progress.currentPageUrl && (
+                <div className='bg-gray-50 px-2 py-1 border-b border-gray-200 flex items-center justify-between'>
+                  <span className='text-[10px] font-medium text-gray-500'>
+                    Current Page
+                  </span>
+                  <span className='text-[10px] font-mono text-gray-400 truncate ml-2 max-w-[200px]'>
+                    {progress.currentPageUrl}
+                  </span>
+                </div>
+              )}
+              {progress.latestScreenshotDataUrl && (
+                <img
+                  src={progress.latestScreenshotDataUrl}
+                  alt='Current page'
+                  className='w-full h-auto'
+                />
+              )}
+              {!progress.latestScreenshotDataUrl && (
+                <div className='p-4 text-center text-xs text-gray-400'>
+                  Waiting for screenshot...
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Pages tab */}
+          {resultTab === 'pages' && (
+            <div
+              ref={eventLogRef}
+              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+            >
+              {progress.events
+                .filter(
+                  e => e.type === 'page_discovered' || e.type === 'navigate'
+                )
+                .map((event, i) => (
+                  <div
+                    key={i}
+                    className='px-2 py-1 border-b border-gray-100 last:border-0'
+                  >
+                    <span className='text-gray-400'>
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>{' '}
+                    <span
+                      className={
+                        event.type === 'page_discovered'
+                          ? 'text-blue-600'
+                          : 'text-gray-500'
+                      }
+                    >
+                      {event.type === 'page_discovered'
+                        ? 'discovered'
+                        : 'navigated'}
+                    </span>{' '}
+                    <span className='text-gray-700'>{event.message}</span>
+                  </div>
+                ))}
+              {progress.events.filter(
+                e => e.type === 'page_discovered' || e.type === 'navigate'
+              ).length === 0 && (
+                <div className='p-3 text-center text-gray-400'>
+                  No pages yet
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Issues tab */}
+          {resultTab === 'issues' && (
+            <div
+              ref={eventLogRef}
+              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+            >
+              {progress.events
+                .filter(e => e.type === 'bug')
+                .map((event, i) => (
+                  <div
+                    key={i}
+                    className='px-2 py-1 border-b border-gray-100 last:border-0'
+                  >
+                    <span className='text-gray-400'>
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>{' '}
+                    <span className='text-red-600'>bug</span>{' '}
+                    <span className='text-gray-700'>{event.message}</span>
+                  </div>
+                ))}
+              {progress.events.filter(e => e.type === 'bug').length === 0 && (
+                <div className='p-3 text-center text-gray-400'>
+                  No issues found
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Actions tab */}
+          {resultTab === 'actions' && (
+            <div
+              ref={eventLogRef}
+              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+            >
+              {progress.events
+                .filter(e =>
+                  [
+                    'click',
+                    'fill',
+                    'select',
+                    'toggle',
+                    'mouseover',
+                    'modal',
+                    'cross_origin',
+                    'new_tab_closed',
+                  ].includes(e.type)
+                )
+                .map((event, i) => (
+                  <div
+                    key={i}
+                    className='px-2 py-1 border-b border-gray-100 last:border-0'
+                  >
+                    <span className='text-gray-400'>
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>{' '}
+                    <span className='text-green-600'>{event.type}</span>{' '}
+                    <span className='text-gray-600'>{event.message}</span>
+                  </div>
+                ))}
+              {progress.events.filter(e =>
+                ['click', 'fill', 'select', 'toggle', 'mouseover'].includes(
+                  e.type
+                )
+              ).length === 0 && (
+                <div className='p-3 text-center text-gray-400'>
+                  No actions yet
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* All events tab */}
+          {resultTab === 'events' && (
+            <div
+              ref={eventLogRef}
+              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+            >
+              {progress.events.slice(-50).map((event, i) => (
+                <div
+                  key={i}
+                  className='px-2 py-0.5 border-b border-gray-100 last:border-0'
+                >
+                  <span className='text-gray-400'>
+                    {new Date(event.timestamp).toLocaleTimeString()}
+                  </span>{' '}
+                  <span className='text-blue-600'>{event.type}</span>{' '}
+                  <span className='text-gray-600'>{event.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

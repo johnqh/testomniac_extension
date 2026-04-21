@@ -5,7 +5,7 @@ import type { BrowserAdapter } from '@sudobility/testomniac_scanning_service';
  * Uses chrome.tabs, chrome.scripting, and chrome.debugger APIs.
  */
 export class ChromeAdapter implements BrowserAdapter {
-  private tabId: number;
+  readonly tabId: number;
   private currentUrl: string = '';
   private debuggerAttached: boolean = false;
   private markerVisible: boolean = false;
