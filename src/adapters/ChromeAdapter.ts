@@ -240,13 +240,21 @@ export class ChromeAdapter implements BrowserAdapter {
           const el = document.querySelector(sel);
           if (!el) return false;
           if (!checkVisible) return true;
+          if (!(el instanceof HTMLElement)) return false;
+          if (el.hidden) return false;
+          if (el.closest('[hidden], [aria-hidden="true"], [inert]')) {
+            return false;
+          }
           const rect = el.getBoundingClientRect();
           const style = window.getComputedStyle(el);
           return (
             rect.width > 0 &&
             rect.height > 0 &&
+            el.getClientRects().length > 0 &&
             style.display !== 'none' &&
-            style.visibility !== 'hidden'
+            style.visibility === 'visible' &&
+            style.pointerEvents !== 'none' &&
+            Number(style.opacity) >= 0.05
           );
         },
         args: [selector, options?.visible ?? false],

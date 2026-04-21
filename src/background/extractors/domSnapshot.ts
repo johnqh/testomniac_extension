@@ -35,10 +35,24 @@ export async function buildDomSnapshot(
     ].join(', ');
 
     function isVisible(el: Element): boolean {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.hidden) return false;
+      if (el.closest('[hidden], [aria-hidden="true"], [inert]')) return false;
+
       const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return false;
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      if (el.getClientRects().length === 0) return false;
+
       const style = window.getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden';
+      if (style.display === 'none' || style.visibility !== 'visible') {
+        return false;
+      }
+      if (style.opacity === '0' || Number(style.opacity) < 0.05) {
+        return false;
+      }
+      if (style.pointerEvents === 'none') return false;
+
+      return true;
     }
 
     function isClickableAncestor(el: Element): boolean {
