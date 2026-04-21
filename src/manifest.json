@@ -9,8 +9,12 @@
     "activeTab",
     "scripting",
     "tabs",
-    "debugger"
+    "debugger",
+    "sidePanel"
   ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",

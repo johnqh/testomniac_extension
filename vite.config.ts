@@ -51,6 +51,7 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         input: {
           popup: path.resolve(__dirname, 'src/popup/index.html'),
+          sidepanel: path.resolve(__dirname, 'src/sidepanel/index.html'),
         },
         output: {
           manualChunks(id) {

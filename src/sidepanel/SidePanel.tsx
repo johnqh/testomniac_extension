@@ -1,0 +1,196 @@
+import { useState, useEffect, useCallback } from "react";
+
+interface ScanProgress {
+  phase: string;
+  pagesFound: number;
+  pageStatesFound: number;
+  actionsCompleted: number;
+  issuesFound: number;
+  currentPageUrl: string | null;
+  latestScreenshotUrl: string | null;
+  isComplete: boolean;
+  events: Array<{ type: string; message: string; timestamp: number }>;
+}
+
+const initialProgress: ScanProgress = {
+  phase: "idle",
+  pagesFound: 0,
+  pageStatesFound: 0,
+  actionsCompleted: 0,
+  issuesFound: 0,
+  currentPageUrl: null,
+  latestScreenshotUrl: null,
+  isComplete: false,
+  events: [],
+};
+
+export function SidePanel() {
+  const [url, setUrl] = useState("");
+  const [isScanning, setIsScanning] = useState(false);
+  const [progress, setProgress] = useState<ScanProgress>(initialProgress);
+  const [error, setError] = useState<string | null>(null);
+
+  // Listen for progress updates from background
+  useEffect(() => {
+    const listener = (message: { type: string; data?: ScanProgress }) => {
+      if (message.type === "SCAN_PROGRESS" && message.data) {
+        setProgress(message.data);
+        if (message.data.isComplete) {
+          setIsScanning(false);
+        }
+      }
+      if (message.type === "SCAN_ERROR") {
+        setError(String((message as { error?: string }).error || "Scan failed"));
+        setIsScanning(false);
+      }
+    };
+    chrome.runtime.onMessage.addListener(listener);
+    return () => chrome.runtime.onMessage.removeListener(listener);
+  }, []);
+
+  const handleStart = useCallback(async () => {
+    if (!url.trim()) return;
+    setError(null);
+    setProgress(initialProgress);
+    setIsScanning(true);
+    chrome.runtime.sendMessage({ type: "START_SCAN", url: url.trim() });
+  }, [url]);
+
+  const handleStop = useCallback(() => {
+    chrome.runtime.sendMessage({ type: "STOP_SCAN" });
+    setIsScanning(false);
+  }, []);
+
+  const phases = [
+    { key: "mouse_scanning", label: "Scanning" },
+    { key: "ai_analysis", label: "AI Analysis" },
+    { key: "input_scanning", label: "Input Testing" },
+    { key: "test_generation", label: "Generating" },
+    { key: "test_execution", label: "Executing" },
+  ];
+
+  const currentPhaseIndex = phases.findIndex(p => p.key === progress.phase);
+
+  return (
+    <div className="p-3 space-y-3 text-sm">
+      {/* Header */}
+      <div className="font-semibold text-gray-900 text-base">Testomniac Scanner</div>
+
+      {/* URL Input */}
+      <div className="space-y-2">
+        <input
+          type="url"
+          value={url}
+          onChange={e => setUrl(e.target.value)}
+          placeholder="https://example.com"
+          disabled={isScanning}
+          className="w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50"
+        />
+        <div className="flex gap-2">
+          {!isScanning ? (
+            <button
+              onClick={handleStart}
+              disabled={!url.trim()}
+              className="flex-1 py-2 px-3 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white"
+            >
+              Start Scan
+            </button>
+          ) : (
+            <button
+              onClick={handleStop}
+              className="flex-1 py-2 px-3 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div className="p-2 rounded-md bg-red-50 text-red-700 text-xs">{error}</div>
+      )}
+
+      {/* Phase Indicator */}
+      {isScanning && (
+        <div className="flex items-center gap-1 flex-wrap">
+          {phases.map((phase, i) => {
+            const isActive = i === currentPhaseIndex;
+            const isComplete = i < currentPhaseIndex;
+            return (
+              <div key={phase.key} className="flex items-center gap-1">
+                <div className={`w-2 h-2 rounded-full ${
+                  isComplete ? "bg-green-500" : isActive ? "bg-blue-500 animate-pulse" : "bg-gray-300"
+                }`} />
+                <span className={`text-xs ${
+                  isActive ? "text-blue-600 font-medium" : isComplete ? "text-green-600" : "text-gray-400"
+                }`}>{phase.label}</span>
+                {i < phases.length - 1 && <div className="w-3 h-px bg-gray-300 mx-0.5" />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Counters */}
+      {(isScanning || progress.isComplete) && (
+        <div className="grid grid-cols-4 gap-2">
+          {[
+            { label: "Pages", value: progress.pagesFound, color: "text-blue-600" },
+            { label: "States", value: progress.pageStatesFound, color: "text-purple-600" },
+            { label: "Actions", value: progress.actionsCompleted, color: "text-green-600" },
+            { label: "Issues", value: progress.issuesFound, color: "text-red-600" },
+          ].map(c => (
+            <div key={c.label} className="text-center">
+              <div className={`text-lg font-bold tabular-nums ${c.color}`}>{c.value}</div>
+              <div className="text-[10px] text-gray-500">{c.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Current Page */}
+      {progress.currentPageUrl && (
+        <div className="rounded-md border border-gray-200 overflow-hidden">
+          <div className="bg-gray-50 px-2 py-1 border-b border-gray-200 flex items-center justify-between">
+            <span className="text-[10px] font-medium text-gray-500">Current Page</span>
+            <span className="text-[10px] font-mono text-gray-400 truncate ml-2 max-w-[200px]">
+              {progress.currentPageUrl}
+            </span>
+          </div>
+          {progress.latestScreenshotUrl && (
+            <img src={progress.latestScreenshotUrl} alt="Current page" className="w-full h-auto" />
+          )}
+        </div>
+      )}
+
+      {/* Event Log */}
+      {progress.events.length > 0 && (
+        <div className="rounded-md border border-gray-200 overflow-hidden">
+          <div className="bg-gray-50 px-2 py-1 border-b border-gray-200">
+            <span className="text-[10px] font-medium text-gray-500">
+              Events ({progress.events.length})
+            </span>
+          </div>
+          <div className="max-h-[200px] overflow-y-auto font-mono text-[10px]">
+            {progress.events.slice(-50).map((event, i) => (
+              <div key={i} className="px-2 py-0.5 border-b border-gray-100 last:border-0">
+                <span className="text-gray-400">
+                  {new Date(event.timestamp).toLocaleTimeString()}
+                </span>{" "}
+                <span className="text-blue-600">{event.type}</span>{" "}
+                <span className="text-gray-600">{event.message}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Complete */}
+      {progress.isComplete && (
+        <div className="p-2 rounded-md bg-green-50 text-green-700 text-xs font-medium">
+          Scan complete!
+        </div>
+      )}
+    </div>
+  );
+}
