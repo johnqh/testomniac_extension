@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 
+const API_URL = 'http://localhost:8027';
+
 interface ScanProgress {
   phase: string;
   pagesFound: number;
@@ -26,9 +28,76 @@ const initialProgress: ScanProgress = {
 
 export function SidePanel() {
   const [url, setUrl] = useState('');
+  const [activeTabUrl, setActiveTabUrl] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ScanProgress>(initialProgress);
   const [error, setError] = useState<string | null>(null);
+
+  // Get active tab URL
+  useEffect(() => {
+    async function getActiveTab() {
+      const [tab] = await chrome.tabs.query({
+        active: true,
+        currentWindow: true,
+      });
+      if (tab?.url && tab.url.startsWith('http')) {
+        setActiveTabUrl(tab.url);
+      }
+    }
+    getActiveTab();
+
+    // Update when tab changes
+    const listener = () => {
+      getActiveTab();
+    };
+    chrome.tabs.onActivated.addListener(listener);
+    const updateListener = (
+      _tabId: number,
+      _changeInfo: unknown,
+      tab: chrome.tabs.Tab
+    ) => {
+      if (tab.active && tab.url && tab.url.startsWith('http')) {
+        setActiveTabUrl(tab.url);
+      }
+    };
+    chrome.tabs.onUpdated.addListener(updateListener);
+    return () => {
+      chrome.tabs.onActivated.removeListener(listener);
+      chrome.tabs.onUpdated.removeListener(updateListener);
+    };
+  }, []);
+
+  // Submit current page URL to API (same as testomniac_app HomePage)
+  const handleTestCurrentPage = useCallback(async () => {
+    if (!activeTabUrl) return;
+    setError(null);
+    setIsSubmitting(true);
+    try {
+      const response = await fetch(`${API_URL}/api/v1/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: activeTabUrl }),
+      });
+      const data = await response.json();
+      if (data.success && data.data?.runId) {
+        setProgress({
+          ...initialProgress,
+          phase: 'pending',
+          currentPageUrl: activeTabUrl,
+        });
+        setUrl(activeTabUrl);
+        // The scanner worker will pick this up and start scanning
+        setError(null);
+      } else {
+        setError(data.data?.message || data.error || 'Failed to submit scan');
+      }
+    } catch {
+      setError('Failed to connect to API');
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [activeTabUrl]);
 
   // Listen for progress updates from background
   useEffect(() => {
@@ -79,6 +148,19 @@ export function SidePanel() {
       <div className='font-semibold text-gray-900 text-base'>
         Testomniac Scanner
       </div>
+
+      {/* Test Current Page Button */}
+      {activeTabUrl && !isScanning && (
+        <button
+          onClick={handleTestCurrentPage}
+          disabled={isSubmitting}
+          className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
+        >
+          {isSubmitting
+            ? 'Submitting...'
+            : `Test ${new URL(activeTabUrl).hostname}`}
+        </button>
+      )}
 
       {/* URL Input */}
       <div className='space-y-2'>
