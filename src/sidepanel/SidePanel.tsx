@@ -27,7 +27,6 @@ const initialProgress: ScanProgress = {
 };
 
 export function SidePanel() {
-  const [url, setUrl] = useState('');
   const [activeTabUrl, setActiveTabUrl] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -86,7 +85,6 @@ export function SidePanel() {
           phase: 'pending',
           currentPageUrl: activeTabUrl,
         });
-        setUrl(activeTabUrl);
         // The scanner worker will pick this up and start scanning
         setError(null);
       } else {
@@ -118,14 +116,6 @@ export function SidePanel() {
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
-
-  const handleStart = useCallback(async () => {
-    if (!url.trim()) return;
-    setError(null);
-    setProgress(initialProgress);
-    setIsScanning(true);
-    chrome.runtime.sendMessage({ type: 'START_SCAN', url: url.trim() });
-  }, [url]);
 
   const handleStop = useCallback(() => {
     chrome.runtime.sendMessage({ type: 'STOP_SCAN' });
@@ -162,35 +152,15 @@ export function SidePanel() {
         </button>
       )}
 
-      {/* URL Input */}
-      <div className='space-y-2'>
-        <input
-          type='url'
-          value={url}
-          onChange={e => setUrl(e.target.value)}
-          placeholder='https://example.com'
-          disabled={isScanning}
-          className='w-full px-3 py-2 text-sm rounded-md border border-gray-300 bg-white focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:opacity-50'
-        />
-        <div className='flex gap-2'>
-          {!isScanning ? (
-            <button
-              onClick={handleStart}
-              disabled={!url.trim()}
-              className='flex-1 py-2 px-3 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white'
-            >
-              Start Scan
-            </button>
-          ) : (
-            <button
-              onClick={handleStop}
-              className='flex-1 py-2 px-3 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white'
-            >
-              Stop
-            </button>
-          )}
-        </div>
-      </div>
+      {/* Stop button when scanning */}
+      {isScanning && (
+        <button
+          onClick={handleStop}
+          className='w-full py-2 px-3 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white'
+        >
+          Stop Scan
+        </button>
+      )}
 
       {error && (
         <div className='p-2 rounded-md bg-red-50 text-red-700 text-xs'>
