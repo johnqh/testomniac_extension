@@ -82,10 +82,16 @@ export function SidePanel() {
       if (data.success && data.data?.runId) {
         setProgress({
           ...initialProgress,
-          phase: 'pending',
+          phase: 'mouse_scanning',
           currentPageUrl: activeTabUrl,
         });
-        // The scanner worker will pick this up and start scanning
+        setIsScanning(true);
+        // Tell background worker to start scanning the current tab
+        chrome.runtime.sendMessage({
+          type: 'START_SCAN',
+          url: activeTabUrl,
+          runId: data.data.runId,
+        });
         setError(null);
       } else {
         setError(data.data?.message || data.error || 'Failed to submit scan');

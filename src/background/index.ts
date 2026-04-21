@@ -237,57 +237,55 @@ function classifyActionKind(
   return 'click';
 }
 
-async function runScan(url: string) {
+async function runScan(url: string, runId: number) {
   await loadConfig();
-
-  if (!apiKey) {
-    chrome.runtime.sendMessage({
-      type: 'SCAN_ERROR',
-      error: 'API key not configured. Set it in extension settings.',
-    });
-    return;
-  }
 
   resetState();
   scanState.isRunning = true;
   scanState.phase = 'mouse_scanning';
+  scanState.runId = runId;
   addEvent('scan_started', `Scanning ${url}`);
 
-  const api = new ApiClient(apiUrl, apiKey);
+  // Immediately claim the run so the server scanner doesn't pick it up
+  const api = apiKey ? new ApiClient(apiUrl + '/api/v1/scanner', apiKey) : null;
 
   try {
-    // Try to get a pending run from the API, or report an error
-    const pendingRun = await api.getPendingRun();
-    if (!pendingRun) {
-      throw new Error(
-        'No pending run found. Create a run from the Testomniac web app first.'
-      );
+    // Claim the run immediately by setting phase to mouse_scanning
+    if (api) {
+      await api.updateRunPhase(runId, 'mouse_scanning');
+      addEvent('run_claimed', `Run #${runId} claimed by extension`);
+
+      // Get app info from the run
+      const pendingRun = await api.getPendingRun();
+      if (pendingRun && pendingRun.id === runId) {
+        scanState.appId = pendingRun.appId;
+      }
     }
 
-    const runId = pendingRun.id;
-    const appId = pendingRun.appId;
-    scanState.runId = runId;
-    scanState.appId = appId;
-    addEvent('run_found', `Run #${runId} (app #${appId})`);
+    // Use the ACTIVE tab — don't create a new one
+    const [activeTab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    if (!activeTab?.id) throw new Error('No active tab found');
 
-    // Update run phase
-    await api.updateRunPhase(runId, 'mouse_scanning');
+    const adapter = new ChromeAdapter(activeTab.id);
 
-    // Create a new tab for scanning
-    const tab = await chrome.tabs.create({ url, active: true });
-    if (!tab.id) throw new Error('Failed to create tab');
+    // If the active tab isn't on the target URL, navigate to it
+    if (activeTab.url !== url) {
+      await adapter.goto(url, { timeout: 30000 });
+    }
 
-    const adapter = new ChromeAdapter(tab.id);
+    // Wait for page to settle
+    await new Promise(r => setTimeout(r, 1000));
 
-    // Wait for initial page load
-    await adapter.waitForNavigation({ timeout: 30000 });
-    await new Promise(r => setTimeout(r, 1000)); // Extra settle time
-
-    scanState.currentPageUrl = url;
-    addEvent('navigate', url);
+    scanState.currentPageUrl = adapter.url();
+    addEvent('navigate', adapter.url());
 
     // Create initial page
-    const page = await api.findOrCreatePage(appId, adapter.url());
+    const appId = scanState.appId;
+    const page =
+      api && appId ? await api.findOrCreatePage(appId, adapter.url()) : null;
     scanState.pagesFound++;
     addEvent('page_discovered', adapter.url());
 
@@ -304,18 +302,22 @@ async function runScan(url: string) {
     const screenshotBase64 = btoa(String.fromCharCode(...screenshotData));
     scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${screenshotBase64}`;
 
-    // Create page state
-    const pageState = await api.createPageState({
-      pageId: page.id,
-      sizeClass: 'desktop',
-      hashes,
-      screenshotPath: '',
-      contentText: await adapter.evaluate(() => document.body.innerText || ''),
-    });
+    // Create page state in API
+    let pageStateId: number | null = null;
+    if (api && page) {
+      const pageState = await api.createPageState({
+        pageId: page.id,
+        sizeClass: 'desktop',
+        hashes,
+        screenshotPath: '',
+        contentText: await adapter.evaluate(
+          () => document.body.innerText || ''
+        ),
+      });
+      pageStateId = pageState.id;
+      await api.insertActionableItems(pageState.id, items);
+    }
     scanState.pageStatesFound++;
-
-    // Insert actionable items
-    await api.insertActionableItems(pageState.id, items);
     addEvent('state_captured', `${items.length} elements found`);
 
     // Process visible, clickable items
@@ -341,14 +343,16 @@ async function runScan(url: string) {
         continue;
       }
 
-      // Record action
-      await api.createAction({
-        runId,
-        type: 'mouseover',
-        actionableItemId: undefined,
-        startingPageStateId: pageState.id,
-        sizeClass: 'desktop',
-      });
+      // Record action in API
+      if (api) {
+        await api.createAction({
+          runId,
+          type: 'mouseover',
+          actionableItemId: undefined,
+          startingPageStateId: pageStateId ?? undefined,
+          sizeClass: 'desktop',
+        });
+      }
       scanState.actionsCompleted++;
 
       // Click
@@ -372,7 +376,9 @@ async function runScan(url: string) {
         if (afterUrl !== beforeUrl) {
           scanState.pagesFound++;
           addEvent('page_discovered', afterUrl);
-          await api.findOrCreatePage(appId, afterUrl);
+          if (api && appId) {
+            await api.findOrCreatePage(appId, afterUrl);
+          }
         }
 
         // Take screenshot after click
@@ -383,19 +389,21 @@ async function runScan(url: string) {
         const newBase64 = btoa(String.fromCharCode(...newScreenshot));
         scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
 
-        await api.createAction({
-          runId,
-          type: 'click',
-          startingPageStateId: pageState.id,
-          sizeClass: 'desktop',
-        });
+        if (api) {
+          await api.createAction({
+            runId,
+            type: 'click',
+            startingPageStateId: pageStateId ?? undefined,
+            sizeClass: 'desktop',
+          });
+        }
         scanState.actionsCompleted++;
       } catch {
         addEvent('warning', `Could not click ${item.selector}`);
       }
 
       // Update run stats periodically
-      if (idx % 5 === 0) {
+      if (api && idx % 5 === 0) {
         await api.updateRunStats(runId, {
           pagesFound: scanState.pagesFound,
           pageStatesFound: scanState.pageStatesFound,
@@ -409,7 +417,9 @@ async function runScan(url: string) {
     // Mark run as completed
     scanState.phase = 'completed';
     scanState.isComplete = true;
-    await api.completeRun(runId);
+    if (api) {
+      await api.completeRun(runId);
+    }
     addEvent(
       'run_completed',
       `Completed with ${scanState.actionsCompleted} actions`
@@ -431,8 +441,8 @@ async function runScan(url: string) {
 // ============================================================================
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message.type === 'START_SCAN' && message.url) {
-    runScan(message.url);
+  if (message.type === 'START_SCAN' && message.url && message.runId) {
+    runScan(message.url, message.runId);
     sendResponse({ ok: true });
   } else if (message.type === 'STOP_SCAN') {
     scanState.isRunning = false;
