@@ -309,15 +309,22 @@ async function detectBrokenLinks(
   const broken: BrokenLinkResult[] = [];
   for (const [href, text] of uniqueLinks) {
     try {
-      const resp = await fetch(href, { method: 'HEAD' });
-      if (resp.status >= 400) {
+      const resp = await fetch(href, {
+        method: 'HEAD',
+        redirect: 'manual',
+      });
+
+      // Treat only clear "missing/server failure" responses as broken.
+      // Skip auth-gated routes, redirects, and CSP/network-blocked cases.
+      if (resp.status === 404 || resp.status === 410 || resp.status >= 500) {
         LOG(`  Broken: ${href} (${resp.status})`);
         broken.push({ href, text, error: `HTTP ${resp.status}` });
+      } else if (resp.status >= 300) {
+        LOG(`  Skipping redirected/auth-gated link: ${href} (${resp.status})`);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'fetch failed';
-      LOG(`  Broken: ${href} (${msg})`);
-      broken.push({ href, text, error: msg });
+      LOG(`  Skipping unreachable/CSP-blocked link check: ${href} (${msg})`);
     }
   }
 
