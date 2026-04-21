@@ -7,6 +7,11 @@
 
 import { ChromeAdapter } from '../adapters/ChromeAdapter';
 import {
+  extractActionableItems,
+  getRegisteredExtractorNames,
+} from './extractors';
+import { fillValuePlanner } from './planners/fillValuePlanner';
+import {
   ApiClient,
   SCREENSHOT_QUALITY,
   HOVER_DELAY_MS,
@@ -88,6 +93,10 @@ function sendProgressToSidePanel() {
     .catch(() => {
       // Side panel may not be open
     });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // Load config from storage
@@ -174,86 +183,6 @@ function uint8ToBase64(bytes: Uint8Array): string {
 // Scanning Logic
 // ============================================================================
 
-async function extractActionableItems(
-  adapter: ChromeAdapter
-): Promise<ActionableItem[]> {
-  LOG('Extracting actionable items from page...');
-  // Tag each element with a unique data attribute for reliable selection
-  const rawItems = await adapter.evaluate(() => {
-    const SELECTORS =
-      'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"]';
-
-    function isVisible(el: Element): boolean {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 && rect.height === 0) return false;
-      const style = window.getComputedStyle(el);
-      return style.display !== 'none' && style.visibility !== 'hidden';
-    }
-
-    const elements: unknown[] = [];
-    let idx = 0;
-    document.querySelectorAll(SELECTORS).forEach(el => {
-      // Assign a unique attribute for reliable re-selection
-      const uid = `tmnc-${idx++}`;
-      el.setAttribute('data-tmnc-id', uid);
-      const selector = `[data-tmnc-id="${uid}"]`;
-
-      const tag = el.tagName;
-      const role = el.getAttribute('role') || '';
-      const ariaLabel = el.getAttribute('aria-label') || '';
-      const text = el.textContent?.trim().slice(0, 80) || '';
-      const name = ariaLabel || text;
-      const rect = el.getBoundingClientRect();
-      const href = el.getAttribute('href') || undefined;
-      const inputType = (el as HTMLInputElement).type || undefined;
-
-      elements.push({
-        stableKey: '',
-        selector,
-        tagName: tag,
-        role: role || undefined,
-        inputType,
-        actionKind: '',
-        accessibleName: name || undefined,
-        textContent: text || undefined,
-        href,
-        disabled: (el as HTMLButtonElement).disabled || false,
-        visible: isVisible(el),
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height,
-        attributes: {},
-      });
-    });
-    return elements;
-  });
-
-  const items = (rawItems as Record<string, unknown>[]) || [];
-  LOG(`Extracted ${items.length} raw elements`);
-
-  const mapped = items.map(item => ({
-    ...(item as unknown as ActionableItem),
-    stableKey:
-      `${item.tagName}|${item.role || ''}|${item.accessibleName || ''}|${item.selector}`.slice(
-        0,
-        32
-      ),
-    actionKind: classifyActionKind(
-      item.tagName as string,
-      item.inputType as string | undefined,
-      item.href as string | undefined
-    ),
-  }));
-
-  const visible = mapped.filter(i => i.visible);
-  const clickable = visible.filter(i => !i.disabled && i.actionKind !== 'fill');
-  LOG(
-    `Items: ${mapped.length} total, ${visible.length} visible, ${clickable.length} clickable`
-  );
-  return mapped;
-}
-
 // ============================================================================
 // Bug Detection Helpers (inline until scanning_service detectors are ready)
 // ============================================================================
@@ -333,6 +262,11 @@ async function detectBrokenLinks(
 }
 
 interface VisualIssue {
+  type: string;
+  description: string;
+}
+
+interface MediaIssue {
   type: string;
   description: string;
 }
@@ -506,17 +440,301 @@ function detectContentIssues(text: string): ContentIssue[] {
   return issues;
 }
 
-function classifyActionKind(
-  tagName: string,
-  inputType?: string,
-  href?: string
-): ActionableItem['actionKind'] {
-  if (tagName === 'A' && href) return 'navigate';
-  if (tagName === 'INPUT' && ['checkbox', 'radio'].includes(inputType || ''))
-    return 'toggle';
-  if (tagName === 'SELECT') return 'select';
-  if (tagName === 'INPUT' || tagName === 'TEXTAREA') return 'fill';
-  return 'click';
+async function detectMediaIssues(
+  adapter: ChromeAdapter
+): Promise<MediaIssue[]> {
+  LOG('Detecting media issues...');
+  const issues = (await adapter.evaluate(() => {
+    const results: Array<{ type: string; description: string }> = [];
+    const media = document.querySelectorAll('video, audio');
+
+    media.forEach((element, index) => {
+      const mediaEl = element as HTMLMediaElement;
+      const tag = element.tagName.toLowerCase();
+      const hasSource =
+        Boolean(mediaEl.getAttribute('src')) ||
+        element.querySelector('source[src]') !== null;
+
+      if (!hasSource) {
+        results.push({
+          type: 'missing_media_source',
+          description: `${tag} #${index + 1} has no source`,
+        });
+        return;
+      }
+
+      if (mediaEl.error) {
+        results.push({
+          type: 'broken_media',
+          description: `${tag} #${index + 1} has media error code ${mediaEl.error.code}`,
+        });
+      } else if (mediaEl.networkState === HTMLMediaElement.NETWORK_NO_SOURCE) {
+        results.push({
+          type: 'broken_media',
+          description: `${tag} #${index + 1} has no playable source`,
+        });
+      }
+    });
+
+    return results;
+  })) as MediaIssue[];
+
+  LOG(`Found ${issues.length} media issues`);
+  return issues;
+}
+
+// ============================================================================
+// Modal Detection & Dismissal
+// ============================================================================
+
+async function detectAndHandleModal(
+  adapter: ChromeAdapter
+): Promise<{ found: boolean; content: string | null }> {
+  const result = await adapter.evaluate(() => {
+    // Look for common modal/popup patterns
+    const modalSelectors = [
+      '.pum-active .pum-container',
+      '.modal.show .modal-content',
+      '[role="dialog"][aria-modal="true"]',
+      '.modal-overlay.active',
+      '.popup.active',
+      '.lightbox.active',
+      '[data-modal].active',
+      '.fancybox-container',
+    ];
+
+    for (const sel of modalSelectors) {
+      const modal = document.querySelector(sel);
+      if (modal && (modal as HTMLElement).offsetWidth > 0) {
+        const text = modal.textContent?.trim().slice(0, 500) || '';
+        return { found: true, content: text };
+      }
+    }
+    return { found: false, content: null };
+  });
+  return (
+    (result as { found: boolean; content: string | null }) || {
+      found: false,
+      content: null,
+    }
+  );
+}
+
+async function dismissModal(adapter: ChromeAdapter): Promise<boolean> {
+  const dismissed = await adapter.evaluate(() => {
+    // Try common close button selectors
+    const closeSelectors = [
+      '.pum-active .pum-close',
+      '.pum-active .popmake-close',
+      '.modal.show .close',
+      '.modal.show .btn-close',
+      '[role="dialog"] [aria-label="Close"]',
+      '[role="dialog"] .close-button',
+      '.modal-overlay.active .close',
+      '.popup.active .close',
+      '.fancybox-close',
+    ];
+
+    for (const sel of closeSelectors) {
+      const btn = document.querySelector(sel) as HTMLElement | null;
+      if (btn && btn.offsetWidth > 0) {
+        btn.click();
+        return true;
+      }
+    }
+
+    // Try clicking the overlay to dismiss (click-to-close modals)
+    const overlay = document.querySelector(
+      '.pum-overlay.pum-active.pum-click-to-close'
+    ) as HTMLElement | null;
+    if (overlay) {
+      // Click outside the modal container
+      overlay.click();
+      return true;
+    }
+
+    // Try pressing Escape
+    document.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })
+    );
+    return false;
+  });
+
+  if (dismissed) {
+    // Wait for dismiss animation
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return dismissed as boolean;
+}
+
+function normalizeHref(href: string, baseUrl: string): string | null {
+  try {
+    const url = new URL(href, baseUrl);
+    url.hash = '';
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function shouldExpectNavigation(
+  item: ActionableItem,
+  beforeUrl: string
+): boolean {
+  if (item.actionKind !== 'navigate' || !item.href) return false;
+  const target = normalizeHref(item.href, beforeUrl);
+  if (!target) return false;
+  return target !== beforeUrl.split('#')[0];
+}
+
+function looksLikeSubmitAction(item: ActionableItem): boolean {
+  const text =
+    `${item.accessibleName || ''} ${item.textContent || ''}`.toLowerCase();
+  const inputType = (item.inputType || '').toLowerCase();
+
+  return (
+    inputType === 'submit' ||
+    text.includes('submit') ||
+    text.includes('send') ||
+    text.includes('search') ||
+    text.includes('book') ||
+    text.includes('report') ||
+    text.includes('save')
+  );
+}
+
+function looksLikeEnterCommitField(item: ActionableItem): boolean {
+  const text =
+    `${item.accessibleName || ''} ${item.textContent || ''}`.toLowerCase();
+  const inputType = (item.inputType || '').toLowerCase();
+  const role = (item.role || '').toLowerCase();
+
+  return (
+    inputType === 'search' ||
+    role === 'combobox' ||
+    text.includes('search') ||
+    text.includes('query')
+  );
+}
+
+function getActionPriority(item: ActionableItem): number {
+  const y = item.y || 0;
+  const text =
+    `${item.accessibleName || ''} ${item.textContent || ''}`.toLowerCase();
+  const href = (item.href || '').toLowerCase();
+  if (item.actionKind === 'fill' || item.actionKind === 'select') return 0;
+  if (item.actionKind === 'toggle') return 1;
+  if (
+    href.includes('/store/') ||
+    href.includes('ec_action=addtocart') ||
+    href.includes('/my-cart/')
+  ) {
+    return 2;
+  }
+  if (looksLikeSubmitAction(item)) return 2;
+  if (
+    text.includes('add to cart') ||
+    text.includes('checkout') ||
+    text.includes('select options')
+  ) {
+    return 2;
+  }
+  if (item.actionKind === 'navigate') return y < 120 ? 6 : 4;
+  if (item.actionKind === 'click') return y < 120 ? 4 : 3;
+  return 3;
+}
+
+async function pickSelectValue(
+  adapter: ChromeAdapter,
+  selector: string
+): Promise<string | null> {
+  const value = await adapter.evaluate((...args: unknown[]) => {
+    const sel = args[0] as string;
+    const element = document.querySelector(sel) as HTMLSelectElement | null;
+    if (!element) return null;
+
+    const options = Array.from(element.options);
+    const candidate = options.find(option => {
+      if (option.disabled) return false;
+      const text = option.textContent?.trim().toLowerCase() || '';
+      return !(
+        text.startsWith('select') ||
+        text.startsWith('choose') ||
+        text.startsWith('pick')
+      );
+    });
+
+    if (!candidate) return null;
+    if (candidate.value) return candidate.value;
+    const index = options.indexOf(candidate);
+    return index >= 0 ? `__index__:${index}` : null;
+  }, selector);
+
+  return (value as string | null) ?? null;
+}
+
+async function pickSelectValues(
+  adapter: ChromeAdapter,
+  selector: string
+): Promise<string[]> {
+  const values = await adapter.evaluate((...args: unknown[]) => {
+    const sel = args[0] as string;
+    const element = document.querySelector(sel) as HTMLSelectElement | null;
+    if (!element) return [];
+
+    const options = Array.from(element.options);
+    return options
+      .map((option, index) => {
+        const text = option.textContent?.trim().toLowerCase() || '';
+        if (option.disabled) return null;
+        if (
+          text.startsWith('select') ||
+          text.startsWith('choose') ||
+          text.startsWith('pick') ||
+          text.startsWith('default')
+        ) {
+          return null;
+        }
+
+        if (option.value) return option.value;
+        return `__index__:${index}`;
+      })
+      .filter(Boolean)
+      .slice(0, 4);
+  }, selector);
+
+  return Array.isArray(values) ? (values as string[]) : [];
+}
+
+async function isToggleChecked(
+  adapter: ChromeAdapter,
+  selector: string
+): Promise<boolean> {
+  const checked = await adapter.evaluate((...args: unknown[]) => {
+    const sel = args[0] as string;
+    const element = document.querySelector(sel) as
+      | HTMLInputElement
+      | HTMLElement
+      | null;
+    if (!element) return false;
+    if ('checked' in element) return Boolean(element.checked);
+    return element.getAttribute('aria-checked') === 'true';
+  }, selector);
+
+  return Boolean(checked);
+}
+
+async function getInputName(
+  adapter: ChromeAdapter,
+  selector: string
+): Promise<string | null> {
+  const name = await adapter.evaluate((...args: unknown[]) => {
+    const sel = args[0] as string;
+    const element = document.querySelector(sel) as HTMLInputElement | null;
+    return element?.name || null;
+  }, selector);
+
+  return (name as string | null) ?? null;
 }
 
 async function runScan(url: string, runId: number) {
@@ -615,7 +833,17 @@ async function runScan(url: string, runId: number) {
 
     // Extract elements
     LOG('Extracting elements...');
+    LOG(
+      `Extracting elements with focused extractors: ${getRegisteredExtractorNames().join(', ')}`
+    );
     const items = await extractActionableItems(adapter);
+    const visible = items.filter(i => i.visible);
+    const clickable = visible.filter(
+      i => !i.disabled && i.actionKind !== 'fill'
+    );
+    LOG(
+      `Items: ${items.length} total, ${visible.length} visible, ${clickable.length} clickable`
+    );
 
     LOG('Getting page HTML...');
     const html = await adapter.content();
@@ -634,6 +862,7 @@ async function runScan(url: string, runId: number) {
     const screenshotBase64 = uint8ToBase64(screenshotData);
     scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${screenshotBase64}`;
     LOG('Screenshot converted to data URL');
+    sendProgressToSidePanel();
 
     // Create page state in API
     let pageStateId: number | null = null;
@@ -678,7 +907,14 @@ async function runScan(url: string, runId: number) {
       addEvent('bug', `${issue.type}: ${issue.description}`);
     }
 
-    // 3. Content checks
+    // 3. Media checks
+    const mediaIssues = await detectMediaIssues(adapter);
+    for (const issue of mediaIssues) {
+      scanState.issuesFound++;
+      addEvent('bug', `${issue.type}: ${issue.description}`);
+    }
+
+    // 4. Content checks
     const contentText2 = await adapter.evaluate(
       () => document.body.innerText || ''
     );
@@ -690,13 +926,14 @@ async function runScan(url: string, runId: number) {
 
     LOG(`Bug detection complete: ${scanState.issuesFound} issues found`);
 
-    // Process visible, clickable items
-    const clickableItems = items.filter(
-      i => i.visible && !i.disabled && i.actionKind !== 'fill'
-    );
+    // Process visible actionable items, including form fields.
+    const clickableItems = items
+      .filter(i => i.visible && !i.disabled)
+      .sort((a, b) => getActionPriority(a) - getActionPriority(b));
     LOG(
       `\n========== SCANNING ${clickableItems.length} CLICKABLE ITEMS ==========`
     );
+    const handledRadioGroups = new Set<string>();
 
     for (
       let idx = 0;
@@ -777,6 +1014,21 @@ async function runScan(url: string, runId: number) {
         await adapter.hover(item.selector, { timeout: 3000 });
         LOG(`  Hover done, waiting ${HOVER_DELAY_MS}ms...`);
         await new Promise(r => setTimeout(r, HOVER_DELAY_MS));
+
+        // Check if hover triggered a modal/popup
+        const hoverModal = await detectAndHandleModal(adapter);
+        if (hoverModal.found) {
+          LOG(
+            `  Modal detected after hover: ${hoverModal.content?.slice(0, 80)}`
+          );
+          addEvent(
+            'modal',
+            `Hover triggered modal: ${hoverModal.content?.slice(0, 60) || 'unknown'}`
+          );
+          // Dismiss the modal before continuing
+          await dismissModal(adapter);
+          LOG(`  Modal dismissed`);
+        }
       } catch (e) {
         WARN(`  Could not hover:`, e);
         addEvent('warning', `Could not hover ${itemInfo}`);
@@ -796,20 +1048,119 @@ async function runScan(url: string, runId: number) {
       }
       scanState.actionsCompleted++;
 
-      // Click
+      // Dismiss any open modal before performing action
+      const preActionModal = await detectAndHandleModal(adapter);
+      if (preActionModal.found) {
+        LOG(`  Dismissing open modal before action...`);
+        await dismissModal(adapter);
+        await new Promise(r => setTimeout(r, 300));
+      }
+
+      // Perform action
       try {
         const beforeUrl = await adapter.getUrl();
-        LOG(`  Clicking... (current URL: ${beforeUrl.slice(0, 60)})`);
-        addEvent('click', itemInfo);
-        await adapter.click(item.selector, { timeout: 3000 });
-        LOG(`  Click done, waiting for page to settle...`);
+        const beforeText = (await adapter.evaluate(
+          () => document.body.innerText || ''
+        )) as string;
+        if (item.actionKind === 'fill') {
+          const value = fillValuePlanner.planValue(item);
+          LOG(`  Filling with "${value}"`);
+          addEvent('fill', `${itemInfo} = ${value}`);
+          await adapter.type(item.selector, value);
+          if (looksLikeEnterCommitField(item)) {
+            LOG('  Committing text entry with Enter');
+            await adapter.submitTextEntry(item.selector);
+          }
+        } else if (item.actionKind === 'select') {
+          const values = await pickSelectValues(adapter, item.selector);
+          if (values.length === 0) {
+            const fallbackValue = await pickSelectValue(adapter, item.selector);
+            if (fallbackValue) values.push(fallbackValue);
+          }
+
+          if (values.length === 0) {
+            LOG('  No suitable option found, skipping');
+            addEvent('warning', `No option to select for ${itemInfo}`);
+            continue;
+          }
+
+          for (const value of values) {
+            LOG(`  Selecting "${value}"`);
+            addEvent('select', `${itemInfo} = ${value}`);
+            await adapter.select(item.selector, value);
+            await new Promise(r => setTimeout(r, 300));
+          }
+        } else if (item.actionKind === 'toggle') {
+          const inputType = (item.inputType || '').toLowerCase();
+          if (inputType === 'radio') {
+            const groupName = await getInputName(adapter, item.selector);
+            if (groupName && handledRadioGroups.has(groupName)) {
+              LOG(`  Radio group "${groupName}" already handled, skipping`);
+              continue;
+            }
+            if (groupName) handledRadioGroups.add(groupName);
+          } else {
+            const checked = await isToggleChecked(adapter, item.selector);
+            if (checked) {
+              LOG('  Already checked, skipping');
+              addEvent('warning', `Already toggled ${itemInfo}`);
+              continue;
+            }
+          }
+          LOG(`  Toggling... (current URL: ${beforeUrl.slice(0, 60)})`);
+          addEvent('toggle', itemInfo);
+          await adapter.click(item.selector, { timeout: 3000 });
+        } else {
+          LOG(`  Clicking... (current URL: ${beforeUrl.slice(0, 60)})`);
+          addEvent('click', itemInfo);
+          await adapter.click(item.selector, { timeout: 3000 });
+        }
+
+        LOG(`  Action done, waiting for page to settle...`);
+        const settleStart = Date.now();
         // Wait for potential navigation to complete
         await adapter.waitForNavigation({ timeout: 3000 }).catch(() => {});
-        await new Promise(r => setTimeout(r, POST_ACTION_SETTLE_MS));
+        const minimumSettleMs = POST_ACTION_SETTLE_MS;
+        const remainingSettleMs = Math.max(
+          0,
+          minimumSettleMs - (Date.now() - settleStart)
+        );
+        LOG(
+          `  Settling for ${minimumSettleMs}ms minimum (${remainingSettleMs}ms remaining after navigation wait)`
+        );
+        await sleep(remainingSettleMs);
+
+        // Check if click triggered a modal/popup
+        const clickModal = await detectAndHandleModal(adapter);
+        if (clickModal.found) {
+          LOG(
+            `  Modal detected after click: ${clickModal.content?.slice(0, 80)}`
+          );
+          addEvent(
+            'modal',
+            `Click triggered modal: ${clickModal.content?.slice(0, 60) || 'unknown'}`
+          );
+
+          // Extract any links/actions from the modal content
+          const modalContent = clickModal.content || '';
+          if (modalContent.length > 10) {
+            const contentIssues = detectContentIssues(modalContent);
+            for (const issue of contentIssues) {
+              scanState.issuesFound++;
+              addEvent('bug', `Modal ${issue.type}: ${issue.description}`);
+            }
+          }
+
+          // Dismiss modal before continuing
+          await dismissModal(adapter);
+          LOG(`  Modal dismissed`);
+          await new Promise(r => setTimeout(r, 300));
+        }
 
         const afterUrl = await adapter.getUrl();
         LOG(`  After URL: ${afterUrl.slice(0, 60)}`);
         scanState.currentPageUrl = afterUrl;
+        sendProgressToSidePanel();
 
         // Check if navigated to a non-web page (devtools, chrome://, etc.)
         if (
@@ -850,6 +1201,7 @@ async function runScan(url: string, runId: number) {
         });
         const newBase64 = uint8ToBase64(newScreenshot);
         scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
+        sendProgressToSidePanel();
 
         // Check if click led to an error page
         const postClickText = (await adapter.evaluate(
@@ -864,10 +1216,42 @@ async function runScan(url: string, runId: number) {
           );
         }
 
+        const normalizedBefore = beforeUrl.split('#')[0];
+        const normalizedAfter = afterUrl.split('#')[0];
+        const textChanged = postClickText.trim() !== beforeText.trim();
+
+        if (
+          shouldExpectNavigation(item, beforeUrl) &&
+          normalizedAfter === normalizedBefore &&
+          !textChanged
+        ) {
+          scanState.issuesFound++;
+          addEvent(
+            'bug',
+            `navigation_no_effect: Clicking "${item.textContent || item.accessibleName || item.href}" did not navigate or change page state`
+          );
+        }
+
+        if (
+          looksLikeSubmitAction(item) &&
+          normalizedAfter === normalizedBefore &&
+          !textChanged &&
+          !postClickIssues.some(i => i.type === 'error_page')
+        ) {
+          scanState.issuesFound++;
+          addEvent(
+            'bug',
+            `action_no_effect: "${item.textContent || item.accessibleName || 'submit action'}" did not change page state`
+          );
+        }
+
         if (api) {
           await api.createAction({
             runId,
-            type: 'click',
+            type:
+              item.actionKind === 'navigate' || item.actionKind === 'click'
+                ? 'click'
+                : item.actionKind,
             startingPageStateId: pageStateId ?? undefined,
             sizeClass: 'desktop',
           });

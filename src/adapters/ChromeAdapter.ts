@@ -8,6 +8,7 @@ export class ChromeAdapter implements BrowserAdapter {
   private tabId: number;
   private currentUrl: string = '';
   private debuggerAttached: boolean = false;
+  private markerVisible: boolean = false;
 
   constructor(tabId: number) {
     this.tabId = tabId;
@@ -91,6 +92,7 @@ export class ChromeAdapter implements BrowserAdapter {
 
     if (result?.result) {
       const { x, y } = result.result;
+      await this.showInteractionMarker(selector, 'click');
       await this.ensureDebugger();
 
       // Dispatch CDP mouse events (with pointerType for proper click synthesis)
@@ -126,9 +128,12 @@ export class ChromeAdapter implements BrowserAdapter {
         }
       );
 
+      await this.hideInteractionMarker();
+
       return;
     }
 
+    await this.hideInteractionMarker();
     throw new Error(`Could not resolve clickable point for ${selector}`);
   }
 
@@ -166,6 +171,7 @@ export class ChromeAdapter implements BrowserAdapter {
 
     if (result?.result) {
       const { x, y } = result.result;
+      await this.showInteractionMarker(selector, 'hover');
       await this.ensureDebugger();
       // Move mouse to element (triggers mouseenter + mouseover on the page)
       await chrome.debugger.sendCommand(
@@ -183,15 +189,42 @@ export class ChromeAdapter implements BrowserAdapter {
     await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
       func: (sel: string, val: string) => {
-        const el = document.querySelector(sel) as HTMLInputElement | null;
+        const el = document.querySelector(sel) as HTMLElement | null;
         if (!el) return;
         el.focus();
-        el.value = val;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+
+        if (
+          el instanceof HTMLInputElement ||
+          el instanceof HTMLTextAreaElement
+        ) {
+          el.value = val;
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        } else if (el.isContentEditable) {
+          el.textContent = val;
+          el.dispatchEvent(
+            new InputEvent('input', { bubbles: true, data: val })
+          );
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        el.dispatchEvent(new Event('blur', { bubbles: true }));
       },
       args: [selector, text],
     });
+  }
+
+  async submitTextEntry(selector: string): Promise<void> {
+    await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      func: (sel: string) => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (!el) return;
+        el.focus();
+      },
+      args: [selector],
+    });
+    await this.pressKey('Enter');
   }
 
   async waitForSelector(
@@ -333,7 +366,28 @@ export class ChromeAdapter implements BrowserAdapter {
       func: (sel: string, val: string) => {
         const el = document.querySelector(sel) as HTMLSelectElement | null;
         if (!el) return;
-        el.value = val;
+
+        if (val.startsWith('__index__:')) {
+          const index = Number(val.slice('__index__:'.length));
+          if (
+            Number.isFinite(index) &&
+            index >= 0 &&
+            index < el.options.length
+          ) {
+            el.selectedIndex = index;
+          }
+        } else {
+          el.value = val;
+          if (el.value !== val) {
+            const option = Array.from(el.options).find(
+              candidate => candidate.textContent?.trim() === val
+            );
+            if (option) {
+              el.value = option.value;
+            }
+          }
+        }
+
         el.dispatchEvent(new Event('change', { bubbles: true }));
       },
       args: [selector, value],
@@ -371,6 +425,63 @@ export class ChromeAdapter implements BrowserAdapter {
       // May already be attached
       this.debuggerAttached = true;
     }
+  }
+
+  private async showInteractionMarker(
+    selector: string,
+    mode: 'hover' | 'click'
+  ): Promise<void> {
+    this.markerVisible = true;
+    await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      func: (sel: string, interaction: 'hover' | 'click') => {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (!el) return;
+
+        const rect = el.getBoundingClientRect();
+        let marker = document.getElementById(
+          '__tmnc-interaction-marker'
+        ) as HTMLDivElement | null;
+        if (!marker) {
+          marker = document.createElement('div');
+          marker.id = '__tmnc-interaction-marker';
+          marker.style.position = 'fixed';
+          marker.style.pointerEvents = 'none';
+          marker.style.zIndex = '2147483647';
+          marker.style.boxSizing = 'border-box';
+          marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
+          marker.style.background = 'rgba(245, 158, 11, 0.2)';
+          marker.style.borderRadius = '8px';
+          marker.style.opacity = '1';
+          marker.style.transition =
+            'left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, opacity 180ms ease-out';
+          document.documentElement.appendChild(marker);
+        }
+
+        marker.style.left = `${rect.left - 4}px`;
+        marker.style.top = `${rect.top - 4}px`;
+        marker.style.width = `${rect.width + 8}px`;
+        marker.style.height = `${rect.height + 8}px`;
+        marker.style.opacity = '1';
+        marker.dataset.phase = interaction;
+      },
+      args: [selector, mode],
+    });
+  }
+
+  private async hideInteractionMarker(): Promise<void> {
+    if (!this.markerVisible) return;
+    this.markerVisible = false;
+
+    await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      func: () => {
+        const marker = document.getElementById('__tmnc-interaction-marker');
+        if (!marker) return;
+        marker.style.opacity = '0';
+        window.setTimeout(() => marker.remove(), 180);
+      },
+    });
   }
 
   private async waitForTabLoad(timeout: number): Promise<void> {

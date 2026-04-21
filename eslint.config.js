@@ -66,6 +66,8 @@ export default [
         HTMLTextAreaElement: 'readonly',
         HTMLSelectElement: 'readonly',
         HTMLCanvasElement: 'readonly',
+        HTMLMediaElement: 'readonly',
+        InputEvent: 'readonly',
         Event: 'readonly',
         Element: 'readonly',
         Node: 'readonly',
