@@ -1,0 +1,2 @@
+[     123ms] [LOG] JQMIGRATE: Migrate is installed with logging active, version 3.4.1 @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:103
+[     129ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://cdn.polyfill.io/v2/polyfill.min.js:0

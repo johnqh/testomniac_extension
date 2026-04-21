@@ -12,8 +12,12 @@ export async function buildDomSnapshot(
       'select',
       'textarea',
       'summary',
+      'label',
+      'video',
+      'audio',
       '[contenteditable=""]',
       '[contenteditable="true"]',
+      '[tabindex]:not([tabindex="-1"])',
       '[role="button"]',
       '[role="link"]',
       '[role="checkbox"]',
@@ -24,6 +28,12 @@ export async function buildDomSnapshot(
       '[role="textbox"]',
       '[role="combobox"]',
       '[role="option"]',
+      '[role="slider"]',
+      '[role="spinbutton"]',
+      '[role="progressbar"]',
+      '[role="listbox"]',
+      '[role="gridcell"]',
+      '[role="treeitem"]',
       '[onclick]',
       '[ondblclick]',
       '[onmousedown]',
@@ -32,6 +42,9 @@ export async function buildDomSnapshot(
       '[onmouseenter]',
       '[onpointerdown]',
       '[onpointerup]',
+      // Drag-and-drop framework handles (jQuery UI, etc.)
+      '.ui-sortable-handle',
+      '.ui-draggable-handle',
     ].join(', ');
 
     function isVisible(el: Element): boolean {
@@ -103,8 +116,12 @@ export async function buildDomSnapshot(
           'select',
           'textarea',
           'summary',
+          'label',
+          'video',
+          'audio',
           '[contenteditable=""]',
           '[contenteditable="true"]',
+          '[tabindex]:not([tabindex="-1"])',
           '[role="button"]',
           '[role="link"]',
           '[role="checkbox"]',
@@ -115,6 +132,12 @@ export async function buildDomSnapshot(
           '[role="textbox"]',
           '[role="combobox"]',
           '[role="option"]',
+          '[role="slider"]',
+          '[role="spinbutton"]',
+          '[role="progressbar"]',
+          '[role="listbox"]',
+          '[role="gridcell"]',
+          '[role="treeitem"]',
         ].join(', ')
       );
     }
@@ -149,8 +172,14 @@ export async function buildDomSnapshot(
       if (el.matches('select')) hints.push('select');
       if (el.matches('textarea')) hints.push('textarea');
       if (el.matches('summary')) hints.push('summary');
+      if (el.matches('label')) hints.push('label');
+      if (el.matches('video')) hints.push('video');
+      if (el.matches('audio')) hints.push('audio');
       if (el.matches('[contenteditable=""], [contenteditable="true"]')) {
         hints.push('contenteditable');
+      }
+      if (el.hasAttribute('tabindex') && el.getAttribute('tabindex') !== '-1') {
+        hints.push('tabindex');
       }
       if (role) hints.push(`role:${role}`);
       if (sourceHint) hints.push(sourceHint);
@@ -165,6 +194,12 @@ export async function buildDomSnapshot(
         el.hasAttribute('onpointerup')
       ) {
         hints.push('mouse-handler');
+      }
+      if (
+        el.classList?.contains('ui-sortable-handle') ||
+        el.classList?.contains('ui-draggable-handle')
+      ) {
+        hints.push('drag-handle');
       }
 
       entries.push({
@@ -204,6 +239,47 @@ export async function buildDomSnapshot(
         }
       }
     });
+
+    // Second pass: find cursor:pointer elements not caught by BASE_SELECTOR.
+    // Many interactive elements use addEventListener (not inline handlers)
+    // and are only detectable via their computed cursor style.
+    // Skip children of already-captured interactive elements — they inherit
+    // cursor:pointer from their parent and clicking them is redundant.
+    const allElements = document.querySelectorAll('body *');
+    for (let i = 0; i < allElements.length; i++) {
+      const el = allElements[i];
+      if (seen.has(el)) continue;
+      if (!(el instanceof HTMLElement)) continue;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width < 8 || rect.height < 8) continue;
+
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility !== 'visible') continue;
+      const cur = style.cursor;
+      if (
+        cur !== 'pointer' &&
+        cur !== 'copy' &&
+        cur !== 'grab' &&
+        cur !== 'move'
+      )
+        continue;
+
+      // Skip if any ancestor is already captured — the cursor:pointer
+      // is inherited and clicking this child is the same as the parent.
+      let ancestorCaptured = false;
+      let parent = el.parentElement;
+      while (parent && parent !== document.body) {
+        if (seen.has(parent)) {
+          ancestorCaptured = true;
+          break;
+        }
+        parent = parent.parentElement;
+      }
+      if (ancestorCaptured) continue;
+
+      pushEntry(el, 'cursor-pointer');
+    }
 
     return entries;
   });

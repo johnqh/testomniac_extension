@@ -1,0 +1,368 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2] [cursor=pointer]: Manage consent
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#sq-content"
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - heading "AcademyBugs.com" [level=3] [ref=e8]:
+          - link "AcademyBugs.com" [ref=e9] [cursor=pointer]:
+            - /url: https://academybugs.com/
+        - navigation [ref=e10]:
+          - list [ref=e12]:
+            - listitem [ref=e13]:
+              - link "Examples of Bugs" [ref=e14] [cursor=pointer]:
+                - /url: https://academybugs.com/
+            - listitem [ref=e15]:
+              - link "Types of Bugs" [ref=e16] [cursor=pointer]:
+                - /url: https://academybugs.com/types/
+            - listitem [ref=e17]:
+              - link "Find Bugs" [ref=e18] [cursor=pointer]:
+                - /url: https://academybugs.com/find-bugs/
+            - listitem [ref=e19]:
+              - link "Report Bugs" [ref=e20] [cursor=pointer]:
+                - /url: https://academybugs.com/report-bugs/
+            - listitem [ref=e21]:
+              - link "" [ref=e22] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e23]: 
+    - main [ref=e27]:
+      - article [ref=e28]:
+        - generic [ref=e29]:
+          - heading "Find Bugs" [level=3] [ref=e30]
+          - heading "Explore a practice test site that has 25 real bugs planted inside." [level=6] [ref=e31]
+          - generic [ref=e32]:
+            - generic [ref=e33]:
+              - generic [ref=e34]:
+                - generic [ref=e35]: View
+                - link "10" [ref=e36] [cursor=pointer]:
+                  - /url: "#"
+                - link "25" [ref=e37] [cursor=pointer]:
+                  - /url: "#"
+                - link "50" [ref=e38] [cursor=pointer]:
+                  - /url: "#"
+              - generic [ref=e39]: Showing all 18 results
+              - combobox [ref=e40]:
+                - option "Default Sorting" [selected]
+                - option "Price Low-High"
+                - option "Price High-Low"
+                - option "Title A-Z"
+                - option "Title Z-A"
+                - option "Newest"
+                - option "Oldest"
+                - option "Best Rating"
+                - option "Most Viewed"
+            - text: 
+            - list:
+              - listitem [ref=e41]:
+                - generic [ref=e42]:
+                  - generic [ref=e43]:
+                    - link [ref=e44] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dnk-yellow-shoes/
+                    - img "DNK Yellow Shoes" [ref=e47] [cursor=pointer]
+                  - heading "DNK Yellow Shoes" [level=3] [ref=e48]:
+                    - link "DNK Yellow Shoes" [ref=e49] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dnk-yellow-shoes/
+                  - generic [ref=e50]: $45.00
+                  - link "ADD TO CART" [ref=e53] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4481370
+                  - text:  
+              - listitem [ref=e54]:
+                - generic [ref=e55]:
+                  - generic [ref=e56]:
+                    - link [ref=e57] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dark-grey-jeans/
+                    - img "Dark Grey Jeans" [ref=e60] [cursor=pointer]
+                  - heading "Dark Grey Jeans" [level=3] [ref=e61]:
+                    - link "Dark Grey Jeans" [ref=e62] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dark-grey-jeans/
+                  - generic [ref=e63]: $46.00
+                  - link "ADD TO CART" [ref=e66] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4281370
+                  - text:  
+              - listitem [ref=e67]:
+                - generic [ref=e68]:
+                  - generic [ref=e69]:
+                    - link [ref=e70] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/flamingo-tshirt/
+                    - img "Flamingo Tshirt" [ref=e73] [cursor=pointer]
+                  - heading "Flamingo Tshirt" [level=3] [ref=e74]:
+                    - link "Flamingo Tshirt" [ref=e75] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/flamingo-tshirt/
+                  - generic [ref=e76]: $15.14
+                  - link "ADD TO CART" [ref=e79] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4881370
+                  - text:  
+              - listitem [ref=e80]:
+                - generic [ref=e81]:
+                  - generic [ref=e82]:
+                    - link [ref=e83] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/blue-hoodie/
+                    - img "Blue Hoodie" [ref=e86] [cursor=pointer]
+                  - heading "Blue Hoodie" [level=3] [ref=e87]:
+                    - link "Blue Hoodie" [ref=e88] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/blue-hoodie/
+                  - generic [ref=e89]: $140.00 $111.00
+                  - link "ADD TO CART" [ref=e92] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3381370
+                  - text:  
+              - listitem [ref=e93]:
+                - generic [ref=e94]:
+                  - generic [ref=e95]:
+                    - link [ref=e96] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/blue-tshirt/
+                    - img "Blue Tshirt" [ref=e99] [cursor=pointer]
+                  - heading "Blue Tshirt" [level=3] [ref=e100]:
+                    - link "Blue Tshirt" [ref=e101] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/blue-tshirt/
+                  - generic [ref=e102]: $79.92
+                  - link "ADD TO CART" [ref=e105] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3481370
+                  - text:  
+              - listitem [ref=e106]:
+                - generic [ref=e107]:
+                  - generic [ref=e108]:
+                    - link [ref=e109] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/faint-washed-denim-blue-jeans/
+                    - img "Faint Washed Denim Blue Jeans" [ref=e112] [cursor=pointer]
+                  - heading "Faint Washed Denim Blue Jeans" [level=3] [ref=e113]:
+                    - link "Faint Washed Denim Blue Jeans" [ref=e114] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/faint-washed-denim-blue-jeans/
+                  - generic [ref=e115]: $117.00
+                  - link "ADD TO CART" [ref=e118] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4681370
+                  - text:  
+              - listitem [ref=e119]:
+                - generic [ref=e120]:
+                  - generic [ref=e121]:
+                    - link [ref=e122] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dark-blue-denim-jeans/
+                    - img "Dark Blue Denim Jeans" [ref=e125] [cursor=pointer]
+                  - heading "Dark Blue Denim Jeans" [level=3] [ref=e126]:
+                    - link "Dark Blue Denim Jeans" [ref=e127] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/dark-blue-denim-jeans/
+                  - link "Login for Pricing" [ref=e130] [cursor=pointer]:
+                    - /url: https://academybugs.com/account/
+                  - text:  
+              - listitem [ref=e131]:
+                - generic [ref=e132]:
+                  - generic [ref=e133]:
+                    - link [ref=e134] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/boho-bangle-bracelet/
+                    - img "Boho Bangle Bracelet" [ref=e137] [cursor=pointer]
+                  - heading "Boho Bangle Bracelet" [level=3] [ref=e138]:
+                    - link "Boho Bangle Bracelet" [ref=e139] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/boho-bangle-bracelet/
+                  - generic [ref=e140]: $185.00
+                  - link "ADD TO CART" [ref=e143] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3681370
+                  - text:  
+              - listitem [ref=e144]:
+                - generic [ref=e145]:
+                  - generic [ref=e146]:
+                    - link [ref=e147] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/heart-bracelet/
+                    - img "Silver Heart Bracelet" [ref=e150] [cursor=pointer]
+                  - heading "Silver Heart Bracelet" [level=3] [ref=e151]:
+                    - link "Silver Heart Bracelet" [ref=e152] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/heart-bracelet/
+                  - generic [ref=e153]: $275.00
+                  - link "ADD TO CART" [ref=e156] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3181370
+                  - text:  
+              - listitem [ref=e157]:
+                - generic [ref=e158]:
+                  - generic [ref=e159]:
+                    - link [ref=e160] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/buddha-bracelet/
+                    - img "Buddha Bracelet" [ref=e163] [cursor=pointer]
+                  - heading "Buddha Bracelet" [level=3] [ref=e164]:
+                    - link "Buddha Bracelet" [ref=e165] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/buddha-bracelet/
+                  - generic [ref=e166]: $107.00
+                  - link "ADD TO CART" [ref=e169] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4081370
+                  - text:  
+              - listitem [ref=e170]:
+                - generic [ref=e171]:
+                  - generic [ref=e172]:
+                    - link [ref=e173] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/light-brown-purse/
+                    - img "Light Brown Purse" [ref=e176] [cursor=pointer]
+                  - heading "Light Brown Purse" [level=3] [ref=e177]:
+                    - link "Light Brown Purse" [ref=e178] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/light-brown-purse/
+                  - generic [ref=e179]: $77.04
+                  - link "ADD TO CART" [ref=e182] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=4981370
+                  - text:  
+              - listitem [ref=e183]:
+                - generic [ref=e184]:
+                  - generic [ref=e185]:
+                    - link [ref=e186] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/black-over-the-shoulder-handbag/
+                    - img "Black Over-the-shoulder Handbag" [ref=e189] [cursor=pointer]
+                  - heading "Black Over-the-shoulder Handbag" [level=3] [ref=e190]:
+                    - link "Black Over-the-shoulder Handbag" [ref=e191] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/black-over-the-shoulder-handbag/
+                  - generic [ref=e192]: $478.00
+                  - link "ADD TO CART" [ref=e195] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3281370
+                  - text:  
+              - listitem [ref=e196]:
+                - generic [ref=e197]:
+                  - generic [ref=e198]:
+                    - link [ref=e199] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/bright-red-bag/
+                    - img "Bright Red Bag" [ref=e202] [cursor=pointer]
+                  - heading "Bright Red Bag" [level=3] [ref=e203]:
+                    - link "Bright Red Bag" [ref=e204] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/bright-red-bag/
+                  - generic [ref=e205]: $92.94
+                  - link "ADD TO CART" [ref=e208] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3881370
+                  - text:  
+              - listitem [ref=e209]:
+                - generic [ref=e210]:
+                  - generic [ref=e211]:
+                    - link [ref=e212] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/white-underground-tshirt/
+                    - img "White Underground Tshirt" [ref=e215] [cursor=pointer]
+                  - heading "White Underground Tshirt" [level=3] [ref=e216]:
+                    - link "White Underground Tshirt" [ref=e217] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/white-underground-tshirt/
+                  - generic [ref=e218]: $136.12
+                  - link "ADD TO CART" [ref=e221] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=5081370
+                  - text:  
+              - listitem [ref=e222]:
+                - generic [ref=e223]:
+                  - generic [ref=e224]:
+                    - link [ref=e225] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/bright-gold-purse-with-chain/
+                    - img "Bright Gold Purse With Chain" [ref=e228] [cursor=pointer]
+                  - heading "Bright Gold Purse With Chain" [level=3] [ref=e229]:
+                    - link "Bright Gold Purse With Chain" [ref=e230] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/bright-gold-purse-with-chain/
+                  - generic [ref=e231]: $124.53
+                  - link "ADD TO CART" [ref=e234] [cursor=pointer]:
+                    - /url: https://academybugs.com/my-cart/?ec_action=addtocart&model_number=3781370
+                  - text:  
+              - listitem [ref=e235]:
+                - generic [ref=e236]:
+                  - generic [ref=e237]:
+                    - link [ref=e238] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/fall-coat/
+                    - img "Fall Coat" [ref=e241] [cursor=pointer]
+                  - heading "Fall Coat" [level=3] [ref=e242]:
+                    - link "Fall Coat" [ref=e243] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/fall-coat/
+                  - generic [ref=e244]: $189.95 $169.95
+                  - link "Select Options" [ref=e247] [cursor=pointer]:
+                    - /url: https://academybugs.com/store/fall-coat/
+                  - text:  
+              - listitem [ref=e248]:
+                - generic [ref=e249]:
+                  - generic [ref=e250]:
+                    - link [ref=e251] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/denim-coat/
+                    - img "Denim Coat" [ref=e254] [cursor=pointer]
+                  - heading "Denim Coat" [level=3] [ref=e255]:
+                    - link "Denim Coat" [ref=e256] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/denim-coat/
+                  - generic [ref=e257]: $149.95 $109.95
+                  - link "Select Options" [ref=e260] [cursor=pointer]:
+                    - /url: https://academybugs.com/store/denim-coat/
+                  - text:  
+              - listitem [ref=e261]:
+                - generic [ref=e262]:
+                  - generic [ref=e263]:
+                    - link [ref=e264] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/professional-suit/
+                    - img "Professional Suit" [ref=e267] [cursor=pointer]
+                  - heading "Professional Suit" [level=3] [ref=e268]:
+                    - link "Professional Suit" [ref=e269] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/professional-suit/
+                  - generic [ref=e270]: $279.95 $239.95
+                  - link "Select Options" [ref=e273] [cursor=pointer]:
+                    - /url: https://academybugs.com/store/professional-suit/
+                  - text:  
+          - paragraph
+    - contentinfo [ref=e274]:
+      - generic [ref=e275]:
+        - generic [ref=e278]:
+          - generic:
+            - list:
+              - listitem [ref=e279]:
+                - link "uTest" [ref=e280] [cursor=pointer]:
+                  - /url: https://www.utest.com/academy
+                  - img "uTest" [ref=e281]
+              - listitem [ref=e282]:
+                - link "Terms & Conditions" [ref=e283] [cursor=pointer]:
+                  - /url: https://www.utest.com/terms-and-conditions
+              - listitem [ref=e284]:
+                - link "Privacy Policy" [ref=e285] [cursor=pointer]:
+                  - /url: https://www.utest.com/privacy-policy
+        - text:      
+  - generic [ref=e287]:
+    - generic [ref=e290]:
+      - paragraph [ref=e291]: You found 0 bug out of 25
+      - generic [ref=e292]:
+        - generic [ref=e293]: Functional Bugs
+        - link "1" [ref=e295]:
+          - /url: "#"
+        - link "2" [ref=e297]:
+          - /url: "#"
+        - link "3" [ref=e299]:
+          - /url: "#"
+        - link "4" [ref=e301]:
+          - /url: "#"
+        - link "5" [ref=e303]:
+          - /url: "#"
+        - generic [ref=e304]: Visual Bugs
+        - link "6" [ref=e306]:
+          - /url: "#"
+        - link "7" [ref=e308]:
+          - /url: "#"
+        - link "8" [ref=e310]:
+          - /url: "#"
+        - link "9" [ref=e312]:
+          - /url: "#"
+        - link "10" [ref=e314]:
+          - /url: "#"
+        - generic [ref=e315]: Content Bugs
+        - link "11" [ref=e317]:
+          - /url: "#"
+        - link "12" [ref=e319]:
+          - /url: "#"
+        - link "13" [ref=e321]:
+          - /url: "#"
+        - link "14" [ref=e323]:
+          - /url: "#"
+        - link "15" [ref=e325]:
+          - /url: "#"
+        - generic [ref=e326]: Performance Bugs
+        - link "16" [ref=e328]:
+          - /url: "#"
+        - link "17" [ref=e330]:
+          - /url: "#"
+        - link "18" [ref=e332]:
+          - /url: "#"
+        - link "19" [ref=e334]:
+          - /url: "#"
+        - link "20" [ref=e336]:
+          - /url: "#"
+        - generic [ref=e337]: Crash Bugs
+        - link "21" [ref=e339]:
+          - /url: "#"
+        - link "22" [ref=e341]:
+          - /url: "#"
+        - link "23" [ref=e343]:
+          - /url: "#"
+        - link "24" [ref=e345]:
+          - /url: "#"
+        - link "25" [ref=e347]:
+          - /url: "#"
+    - link "" [ref=e288] [cursor=pointer]:
+      - /url: "#"
+      - generic [ref=e289]: 

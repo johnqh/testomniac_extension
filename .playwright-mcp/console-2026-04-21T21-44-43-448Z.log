@@ -1,0 +1,28 @@
+[     451ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://cdn.polyfill.io/v2/polyfill.min.js:0
+[     451ms] [LOG] JQMIGRATE: Migrate is installed with logging active, version 3.4.1 @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:103
+[     477ms] [WARNING] JQMIGRATE: jQuery.fn.resize() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     484ms] [WARNING] JQMIGRATE: jQuery.fn.click() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     484ms] [WARNING] JQMIGRATE: jQuery.fn.change() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     484ms] [WARNING] JQMIGRATE: jQuery.fn.submit() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     484ms] [WARNING] JQMIGRATE: jQuery.fn.hover() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     485ms] [LOG] init popups ✔ @ https://academybugs.com/wp-content/plugins/popup-maker/dist/assets/site.js?defer&ver=1.21.0:0
+[     490ms] [WARNING] JQMIGRATE: jQuery.fn.scroll() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     492ms] [WARNING] JQMIGRATE: jQuery.fn.bind() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     492ms] [LOG] fire cmplz_event_statistics @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807883:476
+[     493ms] [LOG] opt-in @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807883:650
+[     495ms] [LOG] fire cmplz_event_functional @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807883:532
+[     495ms] [LOG] fire cmplz_event_marketing @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807883:532
+[     498ms] [LOG] myStickymenu: Entered Sticky Class does not exist, change it in Dashboard / Settings / myStickymenu / Sticky Class.  @ https://academybugs.com/wp-content/plugins/mystickymenu/js/mystickymenu.min.js?ver=2.7.4:0
+[    7920ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://cdn.polyfill.io/v2/polyfill.min.js:0
+[    7939ms] [LOG] JQMIGRATE: Migrate is installed with logging active, version 3.4.1 @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:103
+[    7959ms] [WARNING] JQMIGRATE: jQuery.fn.resize() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7983ms] [WARNING] JQMIGRATE: jQuery.fn.click() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7983ms] [WARNING] JQMIGRATE: jQuery.fn.change() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7983ms] [WARNING] JQMIGRATE: jQuery.fn.submit() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7983ms] [WARNING] JQMIGRATE: jQuery.fn.hover() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7984ms] [LOG] init popups ✔ @ https://academybugs.com/wp-content/plugins/popup-maker/dist/assets/site.js?defer&ver=1.21.0:0
+[    7987ms] [WARNING] JQMIGRATE: jQuery.fn.scroll() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7988ms] [WARNING] JQMIGRATE: jQuery.fn.bind() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[    7988ms] [LOG] opt-in @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807891:650
+[    7990ms] [LOG] fire cmplz_event_functional @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776807891:532
+[    7991ms] [LOG] myStickymenu: Entered Sticky Class does not exist, change it in Dashboard / Settings / myStickymenu / Sticky Class.  @ https://academybugs.com/wp-content/plugins/mystickymenu/js/mystickymenu.min.js?ver=2.7.4:0

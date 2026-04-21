@@ -1,0 +1,231 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2] [cursor=pointer]: Manage consent
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#sq-content"
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - heading "AcademyBugs.com" [level=3] [ref=e8]:
+          - link "AcademyBugs.com" [ref=e9] [cursor=pointer]:
+            - /url: https://academybugs.com/
+        - navigation [ref=e10]:
+          - list [ref=e12]:
+            - listitem [ref=e13]:
+              - link "Examples of Bugs" [ref=e14] [cursor=pointer]:
+                - /url: https://academybugs.com/
+            - listitem [ref=e15]:
+              - link "Types of Bugs" [ref=e16] [cursor=pointer]:
+                - /url: https://academybugs.com/types/
+            - listitem [ref=e17]:
+              - link "Find Bugs" [ref=e18] [cursor=pointer]:
+                - /url: https://academybugs.com/find-bugs/
+            - listitem [ref=e19]:
+              - link "Report Bugs" [ref=e20] [cursor=pointer]:
+                - /url: https://academybugs.com/report-bugs/
+            - listitem [ref=e21]:
+              - link "" [ref=e22] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e23]: 
+    - main [ref=e27]:
+      - generic [ref=e28]:
+        - heading "Report Bugs" [level=3] [ref=e29]
+        - paragraph [ref=e30]: Practice creating professional bug reports by exploring five practice scenarios
+      - generic [ref=e31]:
+        - strong [ref=e32]:
+          - img "📋" [ref=e33]
+          - text: "Important Note:"
+        - text: Each bug can only be reproduced by starting from the specific link provided in the Instructions section. Follow the steps carefully to experience the bug firsthand.
+      - text: 
+      - generic [ref=e34]:
+        - generic [ref=e35]:
+          - heading "Practice Bugs " [level=6] [ref=e37]:
+            - generic [ref=e38]:
+              - text: Practice Bugs
+              - generic [ref=e39]: 
+          - tablist [ref=e40]:
+            - listitem [ref=e41]:
+              - tab "1" [selected] [ref=e42] [cursor=pointer]
+            - listitem [ref=e43]:
+              - tab "2" [ref=e44]
+            - listitem [ref=e45]:
+              - tab "3" [ref=e46]
+            - listitem [ref=e47]:
+              - tab "4" [ref=e48]
+            - listitem [ref=e49]:
+              - tab "5" [ref=e50]
+        - generic [ref=e51]:
+          - tabpanel [ref=e52]:
+            - generic [ref=e53]:
+              - generic [ref=e54]:
+                - heading "Instructions " [level=6] [ref=e55]:
+                  - generic [ref=e56]:
+                    - text: Instructions
+                    - generic [ref=e57]: 
+                - paragraph [ref=e59]:
+                  - text: From the
+                  - link "Find Bugs" [ref=e60] [cursor=pointer]:
+                    - /url: https://academybugs.com/find-bugs
+                  - text: page select any product and then open its image.
+              - generic [ref=e61]:
+                - heading "Issue Title" [level=6] [ref=e63]:
+                  - generic [ref=e64]: Issue Title
+                - combobox [ref=e66] [cursor=pointer]:
+                  - option "— Select the correct option —" [disabled] [selected]
+                  - option "Windows 10 - Home Page - Broken image when product image expanded"
+                  - option "Blank overlay when product image expanded"
+                  - option "Windows - Product Details Page - The product image can't be expanded"
+                  - option "Windows 10 - Product Details Page - Broken image when product image expanded"
+                  - option "Product Details Page - Broken image when product image expanded"
+              - generic [ref=e67]:
+                - heading "Issue Type" [level=6] [ref=e69]:
+                  - generic [ref=e70]: Issue Type
+                - combobox [ref=e72] [cursor=pointer]:
+                  - option "— Select the correct option —" [disabled] [selected]
+                  - option "Content"
+                  - option "Performance"
+                  - option "Visual"
+                  - option "Functional"
+                  - option "Crash"
+              - generic [ref=e73]:
+                - heading "Frequency" [level=6] [ref=e75]:
+                  - generic [ref=e76]: Frequency
+                - generic [ref=e78]:
+                  - generic [ref=e80] [cursor=pointer]:
+                    - radio "Every Time" [ref=e81]
+                    - generic [ref=e82]: Every Time
+                  - generic [ref=e84] [cursor=pointer]:
+                    - radio "Hardly Ever" [ref=e85]
+                    - generic [ref=e86]: Hardly Ever
+                  - generic [ref=e88] [cursor=pointer]:
+                    - radio "Occasionally" [ref=e89]
+                    - generic [ref=e90]: Occasionally
+                  - generic [ref=e92] [cursor=pointer]:
+                    - radio "Once" [ref=e93]
+                    - generic [ref=e94]: Once
+              - generic [ref=e95]:
+                - heading "Priority" [level=6] [ref=e97]:
+                  - generic [ref=e98]: Priority
+                - generic [ref=e100]:
+                  - generic [ref=e102] [cursor=pointer]:
+                    - radio "Low" [ref=e103]
+                    - generic [ref=e104]: Low
+                  - generic [ref=e106] [cursor=pointer]:
+                    - radio "Medium" [ref=e107]
+                    - generic [ref=e108]: Medium
+                  - generic [ref=e110] [cursor=pointer]:
+                    - radio "High" [ref=e111]
+                    - generic [ref=e112]: High
+                  - generic [ref=e114] [cursor=pointer]:
+                    - radio "Critical" [ref=e115]
+                    - generic [ref=e116]: Critical
+              - generic [ref=e117]:
+                - heading "Action Performed" [level=6] [ref=e119]:
+                  - generic [ref=e120]: Action Performed
+                - generic [ref=e121]:
+                  - generic [ref=e122]:
+                    - paragraph [ref=e123]: Drag and drop the correct steps from the list of options on the right.
+                    - list [ref=e124]
+                  - list [ref=e125]:
+                    - listitem [ref=e126]: Open https://academybugs.com/find-bugs/
+                    - listitem [ref=e127]: https://academybugs.com/store/light-brown-purse/
+                    - listitem [ref=e128]: Open any product
+                    - listitem [ref=e129]: Click on the image of the product
+                    - listitem [ref=e130]: Observe the image of the product
+                    - listitem [ref=e131]: A blank overlay with a broken image icon shows up
+                    - listitem [ref=e132]: The image should be displayed properly
+              - generic [ref=e133]:
+                - heading "Expected Result" [level=6] [ref=e135]:
+                  - generic [ref=e136]: Expected Result
+                - combobox [ref=e138] [cursor=pointer]:
+                  - option "— Select the correct option —" [disabled] [selected]
+                  - option "A blank overlay with a broken image icon shows up"
+                  - option "It should work properly"
+                  - option "A broken page is shown"
+                  - option "An expanded image of the product is shown"
+                  - option "The product image is broken when expanded"
+              - generic [ref=e139]:
+                - heading "Actual Result" [level=6] [ref=e141]:
+                  - generic [ref=e142]: Actual Result
+                - combobox [ref=e144] [cursor=pointer]:
+                  - option "— Select the correct option —" [disabled] [selected]
+                  - option "An expanded image of the product should be shown"
+                  - option "It doesn't work properly"
+                  - option "A blank overlay with a broken image icon shows up"
+                  - option "There's an unexpected bug"
+                  - option "There's a visual bug"
+              - generic [ref=e145]:
+                - heading "Error Message" [level=6] [ref=e147]:
+                  - generic [ref=e148]: Error Message
+                - combobox [ref=e150] [cursor=pointer]:
+                  - option "— Select the correct option —" [disabled] [selected]
+                  - option "Leave the field blank"
+                  - option "A blank overlay with a broken image icon shows up"
+                  - option "There is no error message"
+              - generic [ref=e151]:
+                - heading "Attachments" [level=6] [ref=e152]:
+                  - generic [ref=e153]: Attachments
+                - paragraph [ref=e155]: Select the correct option for each attachment.
+              - generic [ref=e156]:
+                - heading "Screenshot" [level=6] [ref=e158]:
+                  - generic [ref=e159]: Screenshot
+                - generic [ref=e162]:
+                  - generic [ref=e163] [cursor=pointer]:
+                    - radio "1" [ref=e164]
+                    - text: "1"
+                  - generic [ref=e165] [cursor=pointer]:
+                    - radio "2" [ref=e166]
+                    - text: "2"
+                  - generic [ref=e167] [cursor=pointer]:
+                    - radio "3" [ref=e168]
+                    - text: "3"
+              - generic [ref=e169]:
+                - heading "Screen recording" [level=6] [ref=e170]:
+                  - generic [ref=e171]: Screen recording
+                - generic [ref=e172]:
+                  - generic [ref=e174]:
+                    - generic [ref=e175] [cursor=pointer]:
+                      - radio "1" [ref=e176]
+                      - text: "1"
+                    - generic [ref=e177] [cursor=pointer]:
+                      - radio "2" [ref=e178]
+                      - text: "2"
+                    - generic [ref=e179] [cursor=pointer]:
+                      - radio "3" [ref=e180]
+                      - text: "3"
+                  - generic [ref=e181]: Your browser does not support the video tag.
+              - generic [ref=e182]:
+                - heading "Log" [level=6] [ref=e183]:
+                  - generic [ref=e184]: Log
+                - generic [ref=e185]:
+                  - generic [ref=e187]:
+                    - generic [ref=e188] [cursor=pointer]:
+                      - radio "1" [ref=e189]
+                      - text: "1"
+                    - generic [ref=e190] [cursor=pointer]:
+                      - radio "2" [ref=e191]
+                      - text: "2"
+                    - generic [ref=e192] [cursor=pointer]:
+                      - radio "3" [ref=e193]
+                      - text: "3"
+                  - generic [ref=e195]:
+                    - link [ref=e196] [cursor=pointer]:
+                      - /url: https://academybugs.com/wp-content/uploads/2020/09/report-bug-1-log-4.log
+                    - generic [ref=e197]: 1.log
+              - button "Submit Issue" [ref=e199] [cursor=pointer]
+          - text:    
+    - contentinfo [ref=e200]:
+      - generic [ref=e201]:
+        - generic [ref=e204]:
+          - generic:
+            - list:
+              - listitem [ref=e205]:
+                - link "uTest" [ref=e206] [cursor=pointer]:
+                  - /url: https://www.utest.com/academy
+                  - img "uTest" [ref=e207]
+              - listitem [ref=e208]:
+                - link "Terms & Conditions" [ref=e209] [cursor=pointer]:
+                  - /url: https://www.utest.com/terms-and-conditions
+              - listitem [ref=e210]:
+                - link "Privacy Policy" [ref=e211] [cursor=pointer]:
+                  - /url: https://www.utest.com/privacy-policy
+        - text:      

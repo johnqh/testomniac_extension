@@ -11,6 +11,12 @@ function isGenericClickable(entry: DomSnapshotEntry): boolean {
   if (tag === 'A' && entry.href) return true;
   if (role === 'link') return true;
   if (entry.sourceHints.includes('mouse-handler')) return true;
+  if (entry.sourceHints.includes('cursor-pointer')) return true;
+  if (entry.sourceHints.includes('drag-handle')) return true;
+  if (entry.sourceHints.includes('label')) return true;
+  if (entry.sourceHints.includes('video')) return true;
+  if (entry.sourceHints.includes('audio')) return true;
+  if (entry.sourceHints.includes('tabindex')) return true;
 
   return (
     entry.sourceHints.includes('anchor') ||

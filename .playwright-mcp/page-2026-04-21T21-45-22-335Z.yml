@@ -1,0 +1,87 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2] [cursor=pointer]: Manage consent
+  - generic [ref=e3]:
+    - link "Skip to content" [ref=e4] [cursor=pointer]:
+      - /url: "#sq-content"
+    - banner [ref=e5]:
+      - generic [ref=e6]:
+        - heading "AcademyBugs.com" [level=3] [ref=e8]:
+          - link "AcademyBugs.com" [ref=e9] [cursor=pointer]:
+            - /url: https://academybugs.com/
+        - navigation [ref=e10]:
+          - list [ref=e12]:
+            - listitem [ref=e13]:
+              - link "Examples of Bugs" [ref=e14] [cursor=pointer]:
+                - /url: https://academybugs.com/
+            - listitem [ref=e15]:
+              - link "Types of Bugs" [ref=e16] [cursor=pointer]:
+                - /url: https://academybugs.com/types/
+            - listitem [ref=e17]:
+              - link "Find Bugs" [ref=e18] [cursor=pointer]:
+                - /url: https://academybugs.com/find-bugs/
+            - listitem [ref=e19]:
+              - link "Report Bugs" [ref=e20] [cursor=pointer]:
+                - /url: https://academybugs.com/report-bugs/
+            - listitem [ref=e21]:
+              - link "" [ref=e22] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e23]: 
+    - main [ref=e27]:
+      - article [ref=e28]:
+        - generic [ref=e29]:
+          - generic [ref=e30]:
+            - heading "Types of Bugs" [level=3] [ref=e31]
+            - heading "Learn the different types of bugs that commonly occur in websites and apps." [level=6] [ref=e32]
+            - generic [ref=e33]:
+              - link " Functional Workflow failures producing an unexpected or illogical application behavior where the actual result differs from the expected result." [ref=e34] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e36]:
+                  - paragraph [ref=e37]:
+                    - generic [ref=e38]: 
+                  - heading "Functional" [level=5] [ref=e39]
+                  - paragraph [ref=e40]: Workflow failures producing an unexpected or illogical application behavior where the actual result differs from the expected result.
+              - link " Visual Visual issues affect the layout and cause user interface distortion such as missing elements or images on a page." [ref=e41] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e43]:
+                  - paragraph [ref=e44]:
+                    - generic [ref=e45]: 
+                  - heading "Visual" [level=5] [ref=e46]
+                  - paragraph [ref=e47]: Visual issues affect the layout and cause user interface distortion such as missing elements or images on a page.
+              - link " Content Content issues affect the text of a page, such as spelling, grammar and localization errors." [ref=e48] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e50]:
+                  - paragraph [ref=e51]:
+                    - generic [ref=e52]: 
+                  - heading "Content" [level=5] [ref=e53]
+                  - paragraph [ref=e54]: Content issues affect the text of a page, such as spelling, grammar and localization errors.
+              - link " Performance Problematic slowness or hanging, sluggish interface. Features take longer to load than they should, slow navigation in the application." [ref=e55] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e57]:
+                  - paragraph [ref=e58]:
+                    - generic [ref=e59]: 
+                  - heading "Performance" [level=5] [ref=e60]
+                  - paragraph [ref=e61]: Problematic slowness or hanging, sluggish interface. Features take longer to load than they should, slow navigation in the application.
+              - link " Crash Application quits or closes unexpectedly while using the features." [ref=e62] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e64]:
+                  - paragraph [ref=e65]:
+                    - generic [ref=e66]: 
+                  - heading "Crash" [level=5] [ref=e67]
+                  - paragraph [ref=e68]: Application quits or closes unexpectedly while using the features.
+          - paragraph
+    - contentinfo [ref=e69]:
+      - generic [ref=e70]:
+        - generic [ref=e73]:
+          - generic:
+            - list:
+              - listitem [ref=e74]:
+                - link "uTest" [ref=e75] [cursor=pointer]:
+                  - /url: https://www.utest.com/academy
+                  - img "uTest" [ref=e76]
+              - listitem [ref=e77]:
+                - link "Terms & Conditions" [ref=e78] [cursor=pointer]:
+                  - /url: https://www.utest.com/terms-and-conditions
+              - listitem [ref=e79]:
+                - link "Privacy Policy" [ref=e80] [cursor=pointer]:
+                  - /url: https://www.utest.com/privacy-policy
+        - text:      

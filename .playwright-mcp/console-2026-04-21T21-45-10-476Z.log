@@ -1,0 +1,13 @@
+[     123ms] [LOG] JQMIGRATE: Migrate is installed with logging active, version 3.4.1 @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:103
+[     135ms] [ERROR] Failed to load resource: net::ERR_NAME_NOT_RESOLVED @ https://cdn.polyfill.io/v2/polyfill.min.js:0
+[     169ms] [WARNING] JQMIGRATE: jQuery.fn.resize() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     181ms] [WARNING] JQMIGRATE: jQuery.fn.click() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     181ms] [WARNING] JQMIGRATE: jQuery.fn.change() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     181ms] [WARNING] JQMIGRATE: jQuery.fn.submit() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     182ms] [WARNING] JQMIGRATE: jQuery.fn.hover() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     188ms] [LOG] init popups ✔ @ https://academybugs.com/wp-content/plugins/popup-maker/dist/assets/site.js?defer&ver=1.21.0:0
+[     192ms] [WARNING] JQMIGRATE: jQuery.fn.scroll() event shorthand is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     193ms] [WARNING] JQMIGRATE: jQuery.fn.bind() is deprecated @ https://academybugs.com/wp-includes/js/jquery/jquery-migrate.js?ver=3.4.1:135
+[     194ms] [LOG] opt-in @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776806180:650
+[     196ms] [LOG] fire cmplz_event_functional @ https://academybugs.com/wp-content/plugins/complianz-gdpr/assets/js/complianz.js?ver=4.7.51776806180:532
+[     198ms] [LOG] myStickymenu: Entered Sticky Class does not exist, change it in Dashboard / Settings / myStickymenu / Sticky Class.  @ https://academybugs.com/wp-content/plugins/mystickymenu/js/mystickymenu.min.js?ver=2.7.4:0

@@ -1,0 +1,201 @@
+- generic [active] [ref=e1]:
+  - dialog "cookieconsent" [ref=e2]:
+    - generic [ref=e3]:
+      - text: "We use cookies to optimize our website and our service:"
+      - link "Cookie Policy" [ref=e4] [cursor=pointer]:
+        - /url: https://academybugs.com/cookie-policy-eu/
+    - generic [ref=e5]:
+      - button "Functional only" [ref=e6] [cursor=pointer]
+      - button "Accept cookies" [ref=e7] [cursor=pointer]
+  - generic [ref=e8]:
+    - link "Skip to content" [ref=e9] [cursor=pointer]:
+      - /url: "#sq-content"
+    - banner [ref=e10]:
+      - generic [ref=e11]:
+        - heading "AcademyBugs.com" [level=3] [ref=e13]:
+          - link "AcademyBugs.com" [ref=e14] [cursor=pointer]:
+            - /url: https://academybugs.com/
+        - navigation [ref=e15]:
+          - list [ref=e17]:
+            - listitem [ref=e18]:
+              - link "Examples of Bugs" [ref=e19] [cursor=pointer]:
+                - /url: https://academybugs.com/
+            - listitem [ref=e20]:
+              - link "Types of Bugs" [ref=e21] [cursor=pointer]:
+                - /url: https://academybugs.com/types/
+            - listitem [ref=e22]:
+              - link "Find Bugs" [ref=e23] [cursor=pointer]:
+                - /url: https://academybugs.com/find-bugs/
+            - listitem [ref=e24]:
+              - link "Report Bugs" [ref=e25] [cursor=pointer]:
+                - /url: https://academybugs.com/report-bugs/
+            - listitem [ref=e26]:
+              - link "" [ref=e27] [cursor=pointer]:
+                - /url: "#"
+                - generic [ref=e28]: 
+    - generic [ref=e30]:
+      - main [ref=e32]:
+        - article [ref=e33]:
+          - generic [ref=e35]:
+            - heading "Home / Shop / All Items" [level=4] [ref=e36]:
+              - link "Home" [ref=e37] [cursor=pointer]:
+                - /url: https://academybugs.com
+              - text: /
+              - link "Shop" [ref=e38] [cursor=pointer]:
+                - /url: https://academybugs.com/store/
+              - text: /
+              - link "All Items" [ref=e39] [cursor=pointer]:
+                - /url: https://academybugs.com/store/all-items/
+            - generic [ref=e40]:
+              - img "DNK Yellow Shoes" [ref=e43] [cursor=pointer]
+              - generic:
+                - generic [ref=e44]:
+                  - heading "Home / Shop / All Items" [level=4] [ref=e45]:
+                    - link "Home" [ref=e46] [cursor=pointer]:
+                      - /url: https://academybugs.com
+                    - text: /
+                    - link "Shop" [ref=e47] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/
+                    - text: /
+                    - link "All Items" [ref=e48] [cursor=pointer]:
+                      - /url: https://academybugs.com/store/all-items/
+                  - heading "DNK Yellow Shoes" [level=1] [ref=e49]
+                  - generic [ref=e51]: $45.00
+                  - generic [ref=e52]: "Model Number: 4481370"
+                  - generic [ref=e53] [cursor=pointer]: Nam nec tellus a odio tincidunt auctor a ornare odio. Sed non mauris vitae erat consequat auctor eu in elit. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Mauris in erat justo. Nullam ac urna eu felis dapibus condimentum sit amet a augue. Sed non neque elit sed.
+                  - generic [ref=e55]:
+                    - generic [ref=e56]:
+                      - button "-" [ref=e57] [cursor=pointer]
+                      - spinbutton [ref=e58]: "1"
+                      - button "+" [ref=e59] [cursor=pointer]
+                    - button "ADD TO CART" [ref=e61] [cursor=pointer]
+                    - generic [ref=e62]: "Your Price: $45.00"
+                - generic [ref=e63]: 35 Left in Stock
+                - generic [ref=e64]: Maximum purchase amount of 10 is allowed
+                - generic [ref=e65]:
+                  - text: "Manufacturer:"
+                  - link "DNK" [ref=e66] [cursor=pointer]:
+                    - /url: https://academybugs.com/stored/extra/dnk/
+                - generic [ref=e67]:
+                  - link "Facebook" [ref=e69] [cursor=pointer]:
+                    - /url: https://www.facebook.com/sharer/sharer.php?p[url]=https://academybugs.com/store/dnk-yellow-shoes/&p[images][o]=https://academybugs.com/wp-content/uploads/2020/10/shoe8-updated.jpg&p[title]=DNK+Yellow+Shoes
+                    - img "Facebook" [ref=e70]
+                  - link "X" [ref=e72] [cursor=pointer]:
+                    - /url: https://twitter.com/intent/tweet?original_referer=https://academybugs.com/store/dnk-yellow-shoes/&source=tweetbutton&text=DNK+Yellow+Shoes&url=https://academybugs.com/store/dnk-yellow-shoes/
+                    - img "X" [ref=e73]
+                  - link "Email" [ref=e75] [cursor=pointer]:
+                    - /url: "mailto:?subject=DNK Yellow Shoes&body=Link for Product: https://academybugs.com/store/dnk-yellow-shoes/"
+                    - img "Email" [ref=e76]
+                  - link "Pinterest" [ref=e78] [cursor=pointer]:
+                    - /url: https://pinterest.com/pin/create/button/?media=https%3A%2F%2Facademybugs.com%2Fwp-content%2Fuploads%2F2020%2F10%2Fshoe8-updated.jpg&description=DNK+Yellow+Shoes&url=https%3A%2F%2Facademybugs.com%2Fstore%2Fdnk-yellow-shoes%2F
+                    - img "Pinterest" [ref=e79]
+                  - link "LinkedIn" [ref=e81] [cursor=pointer]:
+                    - /url: https://www.linkedin.com/shareArticle?mini=true&url=https://academybugs.com/store/dnk-yellow-shoes/
+                    - img "LinkedIn" [ref=e82]
+                  - link "MySpace" [ref=e84] [cursor=pointer]:
+                    - /url: https://academybugs.com/myspace/
+                    - img "MySpace" [ref=e85]
+            - generic [ref=e86]:
+              - list [ref=e87]:
+                - listitem [ref=e88] [cursor=pointer]: Description
+              - paragraph [ref=e91] [cursor=pointer]: Nam nec tellus a odio tincidunt auctor a ornare odio. Sed non mauris vitae erat consequat auctor eu in elit. Class aptent taciti sociosqu ad litora torquent per conubia nostra, per inceptos himenaeos. Mauris in erat justo. Nullam ac urna eu felis dapibus condimentum sit amet a augue. Sed non neque elit sed.
+        - generic [ref=e93]:
+          - heading "Leave a Reply" [level=3] [ref=e94]: Leave a Reply
+          - generic [ref=e95]:
+            - paragraph [ref=e96]:
+              - text: Your email address will not be published.
+              - generic [ref=e97]: Required fields are marked *
+            - paragraph [ref=e98]:
+              - textbox "Comment" [ref=e99]
+            - generic:
+              - paragraph [ref=e100]:
+                - textbox "Name*" [ref=e101]
+              - paragraph [ref=e102]:
+                - textbox "Email*" [ref=e103]
+              - paragraph [ref=e104]:
+                - textbox "Website" [ref=e105]
+            - paragraph [ref=e106]:
+              - button "Post Comment" [ref=e107] [cursor=pointer]
+      - generic [ref=e108]:
+        - heading "Select a Currency" [level=4] [ref=e109]
+        - combobox [ref=e111] [cursor=pointer]:
+          - option "USD" [selected]
+          - option "EUR"
+          - option "GBP"
+          - option "JPY"
+        - heading "Product Search" [level=4] [ref=e112]
+        - generic [ref=e114]:
+          - combobox [ref=e115]
+          - button "Search" [ref=e116] [cursor=pointer]
+        - heading "Hot Item" [level=4] [ref=e117]
+        - generic [ref=e118]:
+          - link [ref=e120] [cursor=pointer]:
+            - /url: https://academybugs.com/anchor-bracelet
+            - img [ref=e121]
+          - link "Silver Heart Bracelet" [ref=e123] [cursor=pointer]:
+            - /url: https://academybugs.com/store/heart-bracelet/
+          - generic [ref=e124]: $275.00
+        - heading "Store Menu" [level=4] [ref=e125]
+        - list [ref=e127]:
+          - listitem [ref=e128]:
+            - link "All Items" [ref=e129] [cursor=pointer]:
+              - /url: https://academybugs.com/store/all-items/
+          - listitem [ref=e130]:
+            - link "Accessories [+]" [ref=e131] [cursor=pointer]:
+              - /url: "#"
+              - text: Accessories
+              - generic [ref=e132]: "[+]"
+          - listitem [ref=e133]:
+            - link "Fashion Type [+]" [ref=e134] [cursor=pointer]:
+              - /url: "#"
+              - text: Fashion Type
+              - generic [ref=e135]: "[+]"
+          - listitem [ref=e136]:
+            - link "Women's Pants" [ref=e137] [cursor=pointer]:
+              - /url: https://academybugs.com/store/womens-pants/
+        - heading "Filter by Price" [level=4] [ref=e138]
+        - generic [ref=e139]:
+          - link "$15.00 - $19.99 (1)" [ref=e141] [cursor=pointer]:
+            - /url: https://academybugs.com/store/dnk-yellow-shoes/?&perpage=25&pricepoint=7
+          - link "$25.00 - $49.99 (2)" [ref=e143] [cursor=pointer]:
+            - /url: https://academybugs.com/store/dnk-yellow-shoes/?&perpage=25&pricepoint=2
+          - link "$50.00 - $99.99 (3)" [ref=e145] [cursor=pointer]:
+            - /url: https://academybugs.com/store/dnk-yellow-shoes/?&perpage=25&pricepoint=3
+          - link "$100.00 - $299.99 (11)" [ref=e147] [cursor=pointer]:
+            - /url: https://academybugs.com/store/dnk-yellow-shoes/?&perpage=25&pricepoint=4
+          - link "Greater Than $299.99 (1)" [ref=e149] [cursor=pointer]:
+            - /url: https://academybugs.com/store/dnk-yellow-shoes/?&perpage=25&pricepoint=5
+        - heading "Shopping Cart" [level=4] [ref=e150]
+        - link "Shopping Cart (0)" [ref=e152] [cursor=pointer]:
+          - /url: "#"
+          - generic [ref=e153]: Shopping Cart (0)
+        - heading "Your Account" [level=4] [ref=e154]
+        - generic:
+          - generic [ref=e155]:
+            - generic [ref=e156]: Email Address*
+            - textbox [ref=e157]
+          - generic [ref=e158]:
+            - generic [ref=e159]: Password*
+            - textbox [ref=e160]
+          - link "Sign Up" [ref=e162] [cursor=pointer]:
+            - /url: https://academybugs.com/account/?ec_page=register
+          - button "SIGN IN" [ref=e164] [cursor=pointer]
+    - contentinfo [ref=e165]:
+      - generic [ref=e166]:
+        - generic [ref=e169]:
+          - generic:
+            - list:
+              - listitem [ref=e170]:
+                - link "uTest" [ref=e171] [cursor=pointer]:
+                  - /url: https://www.utest.com/academy
+                  - img "uTest" [ref=e172]
+              - listitem [ref=e173]:
+                - link "Terms & Conditions" [ref=e174] [cursor=pointer]:
+                  - /url: https://www.utest.com/terms-and-conditions
+              - listitem [ref=e175]:
+                - link "Privacy Policy" [ref=e176] [cursor=pointer]:
+                  - /url: https://www.utest.com/privacy-policy
+        - text:      
+  - link "" [ref=e179] [cursor=pointer]:
+    - /url: "#"
+    - generic [ref=e180]: 
