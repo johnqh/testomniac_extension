@@ -274,13 +274,17 @@ export class ChromeAdapter implements BrowserAdapter {
     type?: string;
     quality?: number;
   }): Promise<Uint8Array> {
-    const tab = await chrome.tabs.get(this.tabId);
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: (options?.type as 'jpeg' | 'png') || 'jpeg',
-      quality: options?.quality || 72,
-    });
-    // Convert data URL to Uint8Array
-    const base64 = dataUrl.split(',')[1];
+    await this.ensureDebugger();
+    const result = (await chrome.debugger.sendCommand(
+      { tabId: this.tabId },
+      'Page.captureScreenshot',
+      {
+        format: (options?.type as 'jpeg' | 'png') || 'jpeg',
+        quality: options?.quality || 72,
+      }
+    )) as { data?: string };
+
+    const base64 = result.data || '';
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) {

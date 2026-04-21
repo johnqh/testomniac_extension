@@ -1,6 +1,6 @@
 {
   "name": "testomniac_extension",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "AI-powered automated UI testing Chrome extension",
   "type": "module",
   "scripts": {
