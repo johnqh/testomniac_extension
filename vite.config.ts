@@ -4,14 +4,20 @@ import { crx } from '@crxjs/vite-plugin';
 import path from 'path';
 import manifest from './src/manifest.json';
 
+const CRX_PORT = 7175;
+
 export default defineConfig(({ mode }) => {
+  // @crxjs reads this env var for HMR port
+  process.env.PORT = String(CRX_PORT);
+
   const env = loadEnv(mode, process.cwd(), '');
 
   // Add dev CSP rules for Vite HMR
   const baseCsp = manifest.content_security_policy.extension_pages;
   const devCsp =
     mode === 'development'
-      ? baseCsp + ' ws://localhost:* http://localhost:*'
+      ? baseCsp +
+        ` ws://localhost:${CRX_PORT} http://localhost:${CRX_PORT} ws://localhost:* http://localhost:* ws://*:${CRX_PORT}`
       : baseCsp;
 
   const dynamicManifest = {
@@ -46,6 +52,17 @@ export default defineConfig(({ mode }) => {
         'react/jsx-runtime',
         'react/jsx-dev-runtime',
       ],
+    },
+    server: {
+      port: CRX_PORT,
+      strictPort: true,
+      origin: `http://localhost:${CRX_PORT}`,
+      hmr: {
+        protocol: 'ws',
+        host: 'localhost',
+        port: CRX_PORT,
+        clientPort: CRX_PORT,
+      },
     },
     build: {
       rollupOptions: {

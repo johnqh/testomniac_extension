@@ -42,29 +42,27 @@ export class ChromeAdapter implements BrowserAdapter {
     });
 
     if (result?.result) {
-      // Use CDP for trusted click events
+      const { x, y } = result.result;
       await this.ensureDebugger();
+      // Move mouse to element first (like a real user)
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        {
-          type: 'mousePressed',
-          x: result.result.x,
-          y: result.result.y,
-          button: 'left',
-          clickCount: 1,
-        }
+        { type: 'mouseMoved', x, y }
       );
+      await new Promise(r => setTimeout(r, 50));
+      // Press
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        {
-          type: 'mouseReleased',
-          x: result.result.x,
-          y: result.result.y,
-          button: 'left',
-          clickCount: 1,
-        }
+        { type: 'mousePressed', x, y, button: 'left', clickCount: 1 }
+      );
+      await new Promise(r => setTimeout(r, 30));
+      // Release
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Input.dispatchMouseEvent',
+        { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 }
       );
     }
   }
@@ -88,15 +86,13 @@ export class ChromeAdapter implements BrowserAdapter {
     });
 
     if (result?.result) {
+      const { x, y } = result.result;
       await this.ensureDebugger();
+      // Move mouse to element (triggers mouseenter + mouseover on the page)
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
         'Input.dispatchMouseEvent',
-        {
-          type: 'mouseMoved',
-          x: result.result.x,
-          y: result.result.y,
-        }
+        { type: 'mouseMoved', x, y }
       );
     }
   }
@@ -178,6 +174,12 @@ export class ChromeAdapter implements BrowserAdapter {
       func: () => document.documentElement.outerHTML,
     });
     return result?.result || '';
+  }
+
+  async getUrl(): Promise<string> {
+    const tab = await chrome.tabs.get(this.tabId);
+    this.currentUrl = tab.url || this.currentUrl;
+    return this.currentUrl;
   }
 
   url(): string {

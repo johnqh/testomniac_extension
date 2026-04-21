@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 const API_URL = 'http://localhost:8027';
 
@@ -9,7 +9,7 @@ interface ScanProgress {
   actionsCompleted: number;
   issuesFound: number;
   currentPageUrl: string | null;
-  latestScreenshotUrl: string | null;
+  latestScreenshotDataUrl: string | null;
   isComplete: boolean;
   events: Array<{ type: string; message: string; timestamp: number }>;
 }
@@ -21,7 +21,7 @@ const initialProgress: ScanProgress = {
   actionsCompleted: 0,
   issuesFound: 0,
   currentPageUrl: null,
-  latestScreenshotUrl: null,
+  latestScreenshotDataUrl: null,
   isComplete: false,
   events: [],
 };
@@ -31,6 +31,7 @@ export function SidePanel() {
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ScanProgress>(initialProgress);
+  const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Get active tab URL
@@ -102,6 +103,13 @@ export function SidePanel() {
       setIsSubmitting(false);
     }
   }, [activeTabUrl]);
+
+  // Auto-scroll event log to bottom
+  useEffect(() => {
+    if (eventLogRef.current) {
+      eventLogRef.current.scrollTop = eventLogRef.current.scrollHeight;
+    }
+  }, [progress.events.length]);
 
   // Listen for progress updates from background
   useEffect(() => {
@@ -257,9 +265,9 @@ export function SidePanel() {
               {progress.currentPageUrl}
             </span>
           </div>
-          {progress.latestScreenshotUrl && (
+          {progress.latestScreenshotDataUrl && (
             <img
-              src={progress.latestScreenshotUrl}
+              src={progress.latestScreenshotDataUrl}
               alt='Current page'
               className='w-full h-auto'
             />
@@ -275,7 +283,10 @@ export function SidePanel() {
               Events ({progress.events.length})
             </span>
           </div>
-          <div className='max-h-[200px] overflow-y-auto font-mono text-[10px]'>
+          <div
+            ref={eventLogRef}
+            className='max-h-[200px] overflow-y-auto font-mono text-[10px]'
+          >
             {progress.events.slice(-50).map((event, i) => (
               <div
                 key={i}
