@@ -1,785 +1,437 @@
 /**
  * Background Service Worker
  *
- * Core of the Testomniac extension. Handles:
- * - Test orchestration
- * - Communication with Testomniac API
- * - State management between popup and content scripts
- * - Screenshot capture via debugger API
+ * Orchestrates scanning using ChromeAdapter + shared scanning lib.
+ * Sends progress updates to the side panel via chrome.runtime.sendMessage.
  */
 
-// Initialize network guard first
-import { initNetworkGuard } from '../shared/security/networkGuard';
-initNetworkGuard();
+import { ChromeAdapter } from "../adapters/ChromeAdapter";
+import {
+  ApiClient,
+  SCREENSHOT_QUALITY,
+  HOVER_DELAY_MS,
+  POST_ACTION_SETTLE_MS,
+} from "@sudobility/testomniac_scanning_service";
+import type { ActionableItem, PageHashes } from "@sudobility/testomniac_types";
 
-import browser from 'webextension-polyfill';
-import type { Runtime } from 'webextension-polyfill';
-import { MessageType } from '../shared/types/messaging';
-import type { TestRun, TestStep, DetectedIssue } from '@testomniac/types';
+console.log("[Testomniac] Background service worker starting...");
 
-console.log('[Testomniac] Background service worker starting...');
+// Config — loaded from chrome.storage.local
+let apiUrl = "http://localhost:8027";
+let apiKey = "";
 
-// API Configuration
-const API_BASE_URL = 'http://localhost:3001/api/v1';
-
-// Current test state
-interface TestState {
+interface ScanState {
   isRunning: boolean;
-  currentTestRun: TestRun | null;
-  currentStep: number;
-  tabId: number | null;
-  logs: string[];
-  visitedUrls: Set<string>;
-  visitedElements: Set<string>; // Track by "text|href" to avoid revisiting same links across pages
-  loopInProgress: boolean;
-  lastUrl: string;
-  samePageClicks: number;
+  runId: number | null;
+  appId: number | null;
+  phase: string;
+  pagesFound: number;
+  pageStatesFound: number;
+  actionsCompleted: number;
+  issuesFound: number;
+  currentPageUrl: string | null;
+  latestScreenshotDataUrl: string | null;
+  events: Array<{ type: string; message: string; timestamp: number }>;
+  isComplete: boolean;
 }
 
-const testState: TestState = {
+let scanState: ScanState = {
   isRunning: false,
-  currentTestRun: null,
-  currentStep: 0,
-  tabId: null,
-  logs: [],
-  visitedUrls: new Set(),
-  visitedElements: new Set(),
-  loopInProgress: false,
-  lastUrl: '',
-  samePageClicks: 0,
+  runId: null,
+  appId: null,
+  phase: "idle",
+  pagesFound: 0,
+  pageStatesFound: 0,
+  actionsCompleted: 0,
+  issuesFound: 0,
+  currentPageUrl: null,
+  latestScreenshotDataUrl: null,
+  events: [],
+  isComplete: false,
 };
 
-function log(message: string): void {
-  const timestamp = new Date().toISOString().substr(11, 8);
-  const logEntry = `[${timestamp}] ${message}`;
-  testState.logs.push(logEntry);
-  console.log('[Testomniac]', message);
-
-  if (testState.logs.length > 50) {
-    testState.logs.shift();
-  }
+function resetState() {
+  scanState = {
+    isRunning: false,
+    runId: null,
+    appId: null,
+    phase: "idle",
+    pagesFound: 0,
+    pageStatesFound: 0,
+    actionsCompleted: 0,
+    issuesFound: 0,
+    currentPageUrl: null,
+    latestScreenshotDataUrl: null,
+    events: [],
+    isComplete: false,
+  };
 }
 
-/**
- * Wait for tab to finish loading
- */
-function waitForTabLoad(tabId: number): Promise<void> {
-  return new Promise(resolve => {
-    const checkTab = async () => {
-      try {
-        const tab = await browser.tabs.get(tabId);
-        if (tab.status === 'complete') {
-          resolve();
-        } else {
-          setTimeout(checkTab, 200);
-        }
-      } catch {
-        resolve();
-      }
-    };
-    checkTab();
+function addEvent(type: string, message: string) {
+  scanState.events.push({ type, message, timestamp: Date.now() });
+  if (scanState.events.length > 100) scanState.events.shift();
+  sendProgressToSidePanel();
+}
+
+function sendProgressToSidePanel() {
+  chrome.runtime.sendMessage({
+    type: "SCAN_PROGRESS",
+    data: { ...scanState },
+  }).catch(() => {
+    // Side panel may not be open
   });
 }
 
-/**
- * Capture screenshot of the current tab
- */
-async function captureScreenshot(tabId: number): Promise<string | null> {
-  try {
-    await chrome.debugger.attach({ tabId }, '1.3');
-    const result = (await chrome.debugger.sendCommand(
-      { tabId },
-      'Page.captureScreenshot',
-      { format: 'png', quality: 80 }
-    )) as { data: string };
-    await chrome.debugger.detach({ tabId });
-    return result.data;
-  } catch (error) {
-    log(`Screenshot failed: ${error}`);
-    return null;
-  }
+// Load config from storage
+async function loadConfig() {
+  const stored = await chrome.storage.local.get(["apiUrl", "apiKey"]);
+  if (stored.apiUrl) apiUrl = stored.apiUrl as string;
+  if (stored.apiKey) apiKey = stored.apiKey as string;
 }
 
-/**
- * Interactive element from content script
- */
-interface InteractiveElement {
-  index: number;
-  type: 'link' | 'button' | 'input' | 'select' | 'textarea';
-  text: string;
-  href?: string;
-  fullHref?: string; // Full resolved URL for validation
-  styleFingerprint: string; // For grouping similar elements
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+// ============================================================================
+// Hashing (browser-compatible using SubtleCrypto)
+// ============================================================================
+
+async function sha256(input: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(input);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
 }
 
-/**
- * Get all interactive elements with their coordinates from the page
- */
-async function getElementsFromPage(tabId: number): Promise<{
-  url: string;
-  title: string;
-  elements: InteractiveElement[];
-  pageContent: string;
-  consoleErrors: string[];
-  networkErrors: string[];
-} | null> {
-  try {
-    const response = (await browser.tabs.sendMessage(tabId, {
-      type: 'GET_ELEMENTS',
-    })) as {
-      success: boolean;
-      url: string;
-      title: string;
-      elements: InteractiveElement[];
-      pageContent: string;
-      consoleErrors: string[];
-      networkErrors: string[];
-    };
-
-    if (response?.success) {
-      return {
-        url: response.url,
-        title: response.title,
-        elements: response.elements,
-        pageContent: response.pageContent || response.title,
-        consoleErrors: response.consoleErrors,
-        networkErrors: response.networkErrors,
-      };
-    }
-    return null;
-  } catch (error) {
-    log(`Failed to get elements: ${error}`);
-    return null;
-  }
-}
-
-/**
- * Normalize href to create consistent keys
- * Removes domain, normalizes trailing slashes
- */
-function normalizeHref(href: string): string {
-  try {
-    // If it's a full URL, extract just the path
-    if (href.startsWith('http://') || href.startsWith('https://')) {
-      const url = new URL(href);
-      return url.pathname.replace(/\/$/, '') || '/';
-    }
-    // Relative URL - just normalize trailing slash
-    return href.replace(/\/$/, '') || '/';
-  } catch {
-    return href;
-  }
-}
-
-/**
- * Get a unique key for an element based on its content (not position)
- */
-function getElementKey(el: InteractiveElement): string {
-  if (el.type === 'link' && el.href) {
-    const normalizedHref = normalizeHref(el.href);
-    return `link:${el.text}|${normalizedHref}`;
-  }
-  return `${el.type}:${el.text}`;
-}
-
-/**
- * Call API to pick which element to click (by index)
- * AI only sees element descriptions, not coordinates
- */
-async function pickElementViaAPI(
-  elements: InteractiveElement[],
-  url: string,
-  title: string
-): Promise<number | null> {
-  log('Calling API to pick element...');
-
-  // Format elements for AI - mark visited ones based on content
-  const elementDescriptions = elements
-    .map((el, i) => {
-      const key = getElementKey(el);
-      const visited = testState.visitedElements.has(key) ? ' [VISITED]' : '';
-      if (el.type === 'link') {
-        return `${i}: [LINK] "${el.text}" -> ${el.href || '?'}${visited}`;
-      } else if (el.type === 'button') {
-        return `${i}: [BUTTON] "${el.text}"${visited}`;
-      } else {
-        return `${i}: [${el.type.toUpperCase()}] "${el.text}"${visited}`;
-      }
+function normalizeHtml(html: string): string {
+  return html
+    .replace(/\s+/g, " ")
+    .replace(/\s*=\s*/g, "=")
+    .replace(/<(\w+)\s+([^>]*)>/g, (_, tag, attrs) => {
+      const sorted = attrs.trim().split(/\s+/).sort().join(" ");
+      return `<${tag} ${sorted}>`;
     })
-    .join('\n');
+    .replace(/>\s+/g, ">")
+    .replace(/\s+</g, "<")
+    .trim();
+}
 
-  const response = await fetch(`${API_BASE_URL}/ai/pick-element`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      url,
-      title,
-      elements: elementDescriptions,
-    }),
+function extractVisibleText(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function computeHashes(
+  html: string,
+  actionableItems: ActionableItem[]
+): Promise<PageHashes> {
+  const normalized = normalizeHtml(html);
+  const visibleText = extractVisibleText(html);
+  const visibleKeys = actionableItems
+    .filter(i => i.visible)
+    .map(i => i.stableKey)
+    .sort()
+    .join("|");
+
+  return {
+    htmlHash: await sha256(html),
+    normalizedHtmlHash: await sha256(normalized),
+    textHash: await sha256(visibleText),
+    actionableHash: await sha256(visibleKeys),
+  };
+}
+
+// ============================================================================
+// Scanning Logic
+// ============================================================================
+
+async function extractActionableItems(adapter: ChromeAdapter): Promise<ActionableItem[]> {
+  // Run element extraction in the page context via the adapter
+  const rawItems = await adapter.evaluate(() => {
+    const SELECTORS = 'a[href], button, input:not([type="hidden"]), select, textarea, summary, [role="button"], [role="link"], [role="checkbox"], [role="radio"], [role="switch"], [role="tab"], [role="menuitem"]';
+
+    function bestSelector(el: Element): string {
+      if (el.id) return "#" + el.id;
+      const testid = el.getAttribute("data-testid");
+      if (testid) return `[data-testid="${testid}"]`;
+      const name = el.getAttribute("name");
+      if (name) return `[name="${name}"]`;
+      return el.tagName.toLowerCase();
+    }
+
+    function isVisible(el: Element): boolean {
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 && rect.height === 0) return false;
+      const style = window.getComputedStyle(el);
+      return style.display !== "none" && style.visibility !== "hidden";
+    }
+
+    const elements: unknown[] = [];
+    document.querySelectorAll(SELECTORS).forEach(el => {
+      const tag = el.tagName;
+      const role = el.getAttribute("role") || "";
+      const ariaLabel = el.getAttribute("aria-label") || "";
+      const text = el.textContent?.trim().slice(0, 80) || "";
+      const name = ariaLabel || text;
+      const rect = el.getBoundingClientRect();
+      const href = el.getAttribute("href") || undefined;
+      const inputType = (el as HTMLInputElement).type || undefined;
+      const selector = bestSelector(el);
+
+      elements.push({
+        stableKey: "",
+        selector,
+        tagName: tag,
+        role: role || undefined,
+        inputType,
+        actionKind: "",
+        accessibleName: name || undefined,
+        textContent: text || undefined,
+        href,
+        disabled: (el as HTMLButtonElement).disabled || false,
+        visible: isVisible(el),
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+        attributes: {},
+      });
+    });
+    return elements;
   });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`API error: ${response.status} - ${error}`);
-  }
-
-  const data = await response.json();
-  if (!data.success) {
-    throw new Error(data.error || 'API returned failure');
-  }
-
-  return data.data.selectedIndex;
+  // Compute stable keys and action kinds on the extension side
+  const items = rawItems as Record<string, unknown>[] || [];
+  return items.map((item) => ({
+    ...(item as unknown as ActionableItem),
+    stableKey: `${item.tagName}|${item.role || ""}|${item.accessibleName || ""}|${item.selector}`.slice(0, 32),
+    actionKind: classifyActionKind(
+      item.tagName as string,
+      item.inputType as string | undefined,
+      item.href as string | undefined
+    ),
+  }));
 }
 
-/**
- * Perform a real mouse click using Chrome DevTools Protocol
- * This creates trusted events that websites can't distinguish from real user input
- */
-async function performRealClick(
-  tabId: number,
-  x: number,
-  y: number
-): Promise<void> {
-  log(`performRealClick at (${x}, ${y})`);
-
-  try {
-    await chrome.debugger.attach({ tabId }, '1.3');
-    log('Debugger attached');
-
-    // Move mouse to position (triggers hover/CSS :hover)
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-      type: 'mouseMoved',
-      x,
-      y,
-    });
-    log('Mouse moved');
-
-    // Wait for hover effects (dropdowns, etc.)
-    await new Promise(r => setTimeout(r, 500));
-
-    // Mouse down
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-      type: 'mousePressed',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1,
-    });
-    log('Mouse pressed');
-
-    // Small delay between press and release
-    await new Promise(r => setTimeout(r, 50));
-
-    // Mouse up
-    await chrome.debugger.sendCommand({ tabId }, 'Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1,
-    });
-    log('Mouse released');
-
-    await chrome.debugger.detach({ tabId });
-    log('Debugger detached');
-  } catch (error) {
-    log(`Debugger error: ${error}`);
-    try {
-      await chrome.debugger.detach({ tabId });
-    } catch {
-      // Ignore detach errors
-    }
-    throw error;
-  }
+function classifyActionKind(
+  tagName: string,
+  inputType?: string,
+  href?: string
+): ActionableItem["actionKind"] {
+  if (tagName === "A" && href) return "navigate";
+  if (tagName === "INPUT" && ["checkbox", "radio"].includes(inputType || "")) return "toggle";
+  if (tagName === "SELECT") return "select";
+  if (tagName === "INPUT" || tagName === "TEXTAREA") return "fill";
+  return "click";
 }
 
-/**
- * Inject content script into tab
- */
-async function injectContentScript(tabId: number): Promise<boolean> {
-  try {
-    // Check if content script is already injected
-    const response = (await browser.tabs
-      .sendMessage(tabId, { type: 'PING' })
-      .catch(() => null)) as { pong?: boolean } | null;
-    if (response?.pong) {
-      return true;
-    }
-  } catch {
-    // Content script not present, need to inject
-  }
+async function runScan(url: string) {
+  await loadConfig();
 
-  try {
-    // Get the content script file from manifest
-    const manifest = chrome.runtime.getManifest();
-    const contentScriptFile = manifest.content_scripts?.[0]?.js?.[0];
-
-    if (!contentScriptFile) {
-      log('No content script found in manifest');
-      return false;
-    }
-
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: [contentScriptFile],
-    });
-    // Wait for script to initialize
-    await new Promise(resolve => setTimeout(resolve, 500));
-    return true;
-  } catch (error) {
-    log(`Failed to inject content script: ${error}`);
-    return false;
-  }
-}
-
-/**
- * Normalize URL for comparison (remove trailing slashes, fragments, etc.)
- */
-function normalizeUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    // Remove fragment and trailing slash
-    return `${parsed.origin}${parsed.pathname.replace(/\/$/, '')}${parsed.search}`;
-  } catch {
-    return url;
-  }
-}
-
-/**
- * Main test loop - get elements with coordinates, pick one via AI, click at coordinates
- */
-async function runTestLoop(): Promise<void> {
-  if (!testState.isRunning || !testState.tabId || !testState.currentTestRun) {
+  if (!apiKey) {
+    chrome.runtime.sendMessage({ type: "SCAN_ERROR", error: "API key not configured. Set it in extension settings." });
     return;
   }
 
-  // Prevent concurrent loops
-  if (testState.loopInProgress) {
-    log('Loop already in progress, skipping');
-    return;
-  }
+  resetState();
+  scanState.isRunning = true;
+  scanState.phase = "mouse_scanning";
+  addEvent("scan_started", `Scanning ${url}`);
 
-  testState.loopInProgress = true;
+  const api = new ApiClient(apiUrl, apiKey);
 
   try {
-    // Wait for page to be ready
-    await waitForTabLoad(testState.tabId);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Ensure content script is injected after navigation
-    const injected = await injectContentScript(testState.tabId);
-    if (!injected) {
-      log('Failed to inject content script, retrying...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      testState.loopInProgress = false;
-      runTestLoop();
-      return;
+    // Try to get a pending run from the API, or report an error
+    const pendingRun = await api.getPendingRun();
+    if (!pendingRun) {
+      throw new Error("No pending run found. Create a run from the Testomniac web app first.");
     }
 
-    // Get elements with their coordinates from the page
-    const pageData = await getElementsFromPage(testState.tabId);
-    if (!pageData) {
-      log('Failed to get elements, retrying...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      testState.loopInProgress = false;
-      runTestLoop();
-      return;
-    }
+    const runId = pendingRun.id;
+    const appId = pendingRun.appId;
+    scanState.runId = runId;
+    scanState.appId = appId;
+    addEvent("run_found", `Run #${runId} (app #${appId})`);
 
-    const { url, title, elements, consoleErrors, networkErrors } = pageData;
-    const normalizedUrl = normalizeUrl(url);
+    // Update run phase
+    await api.updateRunPhase(runId, "mouse_scanning");
 
-    log(`Page: ${title} (${url})`);
-    log(`Found ${elements.length} interactive elements`);
+    // Create a new tab for scanning
+    const tab = await chrome.tabs.create({ url, active: true });
+    if (!tab.id) throw new Error("Failed to create tab");
 
-    // Track visited URL
-    testState.visitedUrls.add(normalizedUrl);
+    const adapter = new ChromeAdapter(tab.id);
 
-    // Check if we're on same page (click didn't navigate)
-    if (testState.lastUrl === normalizedUrl) {
-      testState.samePageClicks++;
-      log(`Same page click #${testState.samePageClicks}`);
-      if (testState.samePageClicks >= 10) {
-        log('Too many clicks on same page, stopping');
-        testState.loopInProgress = false;
-        await stopTest();
-        return;
-      }
-    } else {
-      testState.samePageClicks = 0;
-      testState.lastUrl = normalizedUrl;
-    }
+    // Wait for initial page load
+    await adapter.waitForNavigation({ timeout: 30000 });
+    await new Promise(r => setTimeout(r, 1000)); // Extra settle time
 
-    // Capture screenshot
-    const screenshot = await captureScreenshot(testState.tabId);
+    scanState.currentPageUrl = url;
+    addEvent("navigate", url);
 
-    // Record step
-    const step: TestStep = {
-      id: `step-${testState.currentStep}`,
-      testRunId: testState.currentTestRun.id,
-      sequenceNumber: testState.currentStep,
-      action: 'navigate',
-      target: url,
-      targetDescription: title,
-      screenshotPath: screenshot || undefined,
-      timestamp: new Date().toISOString(),
-      success: true,
-    };
-    testState.currentTestRun.steps.push(step);
+    // Create initial page
+    const page = await api.findOrCreatePage(appId, adapter.url());
+    scanState.pagesFound++;
+    addEvent("page_discovered", adapter.url());
 
-    // Record issues
-    if (consoleErrors.length > 0) {
-      const issue: DetectedIssue = {
-        id: `issue-${Date.now()}`,
-        testRunId: testState.currentTestRun.id,
-        stepId: step.id,
-        type: 'console_error',
-        severity: 'high',
-        title: 'Console errors detected',
-        description: consoleErrors.join('\n'),
-        screenshots: screenshot ? [screenshot] : [],
-        consoleErrors,
-        createdAt: new Date().toISOString(),
-      };
-      testState.currentTestRun.issues.push(issue);
-    }
+    // Extract elements
+    const items = await extractActionableItems(adapter);
+    const html = await adapter.content();
+    const hashes = await computeHashes(html, items);
 
-    if (networkErrors.length > 0) {
-      const issue: DetectedIssue = {
-        id: `issue-${Date.now() + 1}`,
-        testRunId: testState.currentTestRun.id,
-        stepId: step.id,
-        type: 'network_error',
-        severity: 'medium',
-        title: 'Network errors detected',
-        description: networkErrors.join('\n'),
-        screenshots: screenshot ? [screenshot] : [],
-        networkErrors,
-        createdAt: new Date().toISOString(),
-      };
-      testState.currentTestRun.issues.push(issue);
-    }
+    // Take screenshot
+    const screenshotData = await adapter.screenshot({ type: "jpeg", quality: SCREENSHOT_QUALITY });
+    const screenshotBase64 = btoa(String.fromCharCode(...screenshotData));
+    scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${screenshotBase64}`;
 
-    testState.currentStep++;
+    // Create page state
+    const pageState = await api.createPageState({
+      pageId: page.id,
+      sizeClass: "desktop",
+      hashes,
+      screenshotPath: "",
+      contentText: await adapter.evaluate(() => document.body.innerText || ""),
+    });
+    scanState.pageStatesFound++;
 
-    // Count unvisited elements (based on content, not position)
-    const unvisitedCount = elements.filter(
-      el => !testState.visitedElements.has(getElementKey(el))
-    ).length;
-    log(`Unvisited elements: ${unvisitedCount}/${elements.length}`);
+    // Insert actionable items
+    await api.insertActionableItems(pageState.id, items);
+    addEvent("state_captured", `${items.length} elements found`);
 
-    // If no elements or all visited, stop
-    if (elements.length === 0 || unvisitedCount === 0) {
-      log('No unvisited elements, test complete');
-      testState.loopInProgress = false;
-      await stopTest();
-      return;
-    }
+    // Process visible, clickable items
+    const clickableItems = items.filter(
+      i => i.visible && !i.disabled && i.actionKind !== "fill"
+    );
 
-    // Ask AI to pick an element (by index)
-    try {
-      const selectedIndex = await pickElementViaAPI(elements, url, title);
+    for (let idx = 0; idx < clickableItems.length && scanState.isRunning; idx++) {
+      const item = clickableItems[idx];
+      if (!item.selector) continue;
 
-      if (
-        selectedIndex === null ||
-        selectedIndex < 0 ||
-        selectedIndex >= elements.length
-      ) {
-        log('AI returned invalid index, stopping');
-        testState.loopInProgress = false;
-        await stopTest();
-        return;
+      // Mouseover
+      try {
+        addEvent("mouseover", item.selector);
+        await adapter.hover(item.selector, { timeout: 3000 });
+        await new Promise(r => setTimeout(r, HOVER_DELAY_MS));
+      } catch {
+        addEvent("warning", `Could not hover ${item.selector}`);
+        continue;
       }
 
-      let element = elements[selectedIndex];
-      let elementKey = getElementKey(element);
-      log(
-        `AI picked element ${selectedIndex}: ${element.type} "${element.text}" at (${element.x}, ${element.y})`
-      );
+      // Record action
+      await api.createAction({
+        runId,
+        type: "mouseover",
+        actionableItemId: undefined,
+        startingPageStateId: pageState.id,
+        sizeClass: "desktop",
+      });
+      scanState.actionsCompleted++;
 
-      // If AI picked a visited element, find the first unvisited one instead
-      if (testState.visitedElements.has(elementKey)) {
-        log(`AI picked visited element, finding unvisited one...`);
-        const unvisitedElement = elements.find(
-          el => !testState.visitedElements.has(getElementKey(el))
-        );
-        if (!unvisitedElement) {
-          log('No unvisited elements found, stopping');
-          testState.loopInProgress = false;
-          await stopTest();
-          return;
+      // Click
+      try {
+        const beforeUrl = adapter.url();
+        addEvent("click", item.selector);
+        await adapter.click(item.selector, { timeout: 3000 });
+        await new Promise(r => setTimeout(r, POST_ACTION_SETTLE_MS));
+
+        const afterUrl = adapter.url();
+        scanState.currentPageUrl = afterUrl;
+
+        // Check for cross-origin navigation
+        if (new URL(afterUrl).origin !== new URL(url).origin) {
+          addEvent("cross_origin", `Navigated to ${afterUrl}, going back`);
+          await adapter.goto(url, { timeout: 30000 });
+          continue;
         }
-        element = unvisitedElement;
-        elementKey = getElementKey(element);
-        log(
-          `Using unvisited element instead: ${element.type} "${element.text}" at (${element.x}, ${element.y})`
-        );
-      }
 
-      // Mark as visited by content (persists across pages)
-      testState.visitedElements.add(elementKey);
-      log(`Marked as visited: ${elementKey}`);
-
-      // Store expected URL before clicking (for links)
-      const expectedUrl = element.fullHref || element.href;
-      if (expectedUrl) {
-        log(`Expected destination: ${expectedUrl}`);
-      }
-
-      // Click at the element's coordinates using CDP
-      await performRealClick(testState.tabId, element.x, element.y);
-
-      log('Click executed, waiting for page...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // Validate navigation result (for links)
-      if (expectedUrl && testState.tabId) {
-        try {
-          const tab = await browser.tabs.get(testState.tabId);
-          const actualUrl = tab.url || '';
-          const expectedPath = normalizeHref(expectedUrl);
-          const actualPath = normalizeHref(actualUrl);
-
-          const urlMatched = expectedPath === actualPath;
-          if (urlMatched) {
-            log(`URL validation PASSED: ${actualPath}`);
-          } else {
-            log(`URL validation: expected ${expectedPath}, got ${actualPath}`);
-          }
-
-          // Get page content for AI validation
-          await new Promise(r => setTimeout(r, 500)); // Wait for content to load
-          const newPageData = await getElementsFromPage(testState.tabId);
-
-          if (newPageData) {
-            // Call AI to validate page content matches element text
-            try {
-              const validationResponse = await fetch(
-                `${API_BASE_URL}/ai/validate-page`,
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    elementText: element.text,
-                    expectedUrl,
-                    actualUrl,
-                    pageTitle: newPageData.title,
-                    pageContent: newPageData.pageContent,
-                  }),
-                }
-              );
-
-              if (validationResponse.ok) {
-                const validationData = await validationResponse.json();
-                if (validationData.success) {
-                  const { relevant, summary, confidence } = validationData.data;
-                  log(
-                    `AI validation: relevant=${relevant}, confidence=${confidence.toFixed(2)}`
-                  );
-                  log(`Page summary: ${summary}`);
-
-                  // Store element record
-                  try {
-                    await fetch(`${API_BASE_URL}/elements`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        appId: new URL(url).hostname,
-                        pageUrl: url,
-                        elementKey,
-                        expectedUrl,
-                        styleFingerprint: element.styleFingerprint,
-                        verified: urlMatched && relevant,
-                      }),
-                    });
-
-                    // Store navigation result
-                    await fetch(`${API_BASE_URL}/elements/navigation-results`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({
-                        elementId: elementKey,
-                        actualUrl,
-                        expectedUrl,
-                        matched: urlMatched,
-                        aiValidation: { relevant, summary, confidence },
-                      }),
-                    });
-                    log('Element and navigation result stored');
-                  } catch (storeErr) {
-                    log(`Failed to store element: ${storeErr}`);
-                  }
-                }
-              }
-            } catch (validationErr) {
-              log(`AI validation failed: ${validationErr}`);
-            }
-          }
-        } catch (e) {
-          log(`Could not validate URL: ${e}`);
+        // Check if URL changed (new page discovered)
+        if (afterUrl !== beforeUrl) {
+          scanState.pagesFound++;
+          addEvent("page_discovered", afterUrl);
+          await api.findOrCreatePage(appId, afterUrl);
         }
+
+        // Take screenshot after click
+        const newScreenshot = await adapter.screenshot({ type: "jpeg", quality: SCREENSHOT_QUALITY });
+        const newBase64 = btoa(String.fromCharCode(...newScreenshot));
+        scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
+
+        await api.createAction({
+          runId,
+          type: "click",
+          startingPageStateId: pageState.id,
+          sizeClass: "desktop",
+        });
+        scanState.actionsCompleted++;
+      } catch {
+        addEvent("warning", `Could not click ${item.selector}`);
       }
 
-      testState.loopInProgress = false;
-      runTestLoop();
-    } catch (error) {
-      log(`AI pick failed: ${error}`);
-      testState.loopInProgress = false;
-      await stopTest();
-    }
-  } catch (error) {
-    log(`Test loop error: ${error}`);
-    if (testState.isRunning) {
-      log('Retrying after error...');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      testState.loopInProgress = false;
-      runTestLoop();
-    } else {
-      testState.loopInProgress = false;
-    }
-  }
-}
-
-/**
- * Start a new test run
- */
-async function startTest(url: string, configId?: string): Promise<void> {
-  log(`Starting test for: ${url}`);
-
-  const tab = await browser.tabs.create({ url, active: true });
-
-  if (!tab.id) {
-    throw new Error('Failed to create test tab');
-  }
-
-  testState.isRunning = true;
-  testState.tabId = tab.id;
-  testState.currentStep = 0;
-  testState.logs = [];
-  testState.visitedUrls = new Set();
-  testState.visitedElements = new Set();
-  testState.loopInProgress = false;
-  testState.lastUrl = '';
-  testState.samePageClicks = 0;
-  testState.currentTestRun = {
-    id: `run-${Date.now()}`,
-    userId: 'extension-user',
-    configId,
-    status: 'running',
-    startUrl: url,
-    steps: [],
-    issues: [],
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-
-  log('Test run created');
-
-  // Start the test loop
-  await waitForTabLoad(tab.id);
-  log('Page loaded, starting analysis');
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  runTestLoop();
-}
-
-/**
- * Stop the current test
- */
-async function stopTest(): Promise<TestRun | null> {
-  if (!testState.currentTestRun) {
-    return null;
-  }
-
-  testState.currentTestRun.status = 'completed';
-  testState.currentTestRun.completedAt = new Date().toISOString();
-  testState.currentTestRun.updatedAt = new Date().toISOString();
-
-  const completedRun = { ...testState.currentTestRun };
-
-  log(
-    `Test completed: ${completedRun.steps.length} steps, ${completedRun.issues.length} issues`
-  );
-
-  testState.isRunning = false;
-  testState.currentTestRun = null;
-  testState.currentStep = 0;
-  testState.tabId = null;
-  testState.visitedUrls.clear();
-  testState.visitedElements.clear();
-  testState.loopInProgress = false;
-  testState.lastUrl = '';
-  testState.samePageClicks = 0;
-
-  return completedRun;
-}
-
-// Message types for internal use
-interface BackgroundMessage {
-  type: string;
-  payload?: {
-    url?: string;
-    configId?: string;
-    [key: string]: unknown;
-  };
-}
-
-// Message listener
-browser.runtime.onMessage.addListener(
-  async (message: unknown, _sender: Runtime.MessageSender) => {
-    const msg = message as BackgroundMessage;
-
-    if (msg.type === 'PING') {
-      return { pong: true };
-    }
-
-    log(`Received: ${msg.type}`);
-
-    switch (msg.type) {
-      case MessageType.START_TEST:
-        if (msg.payload?.url) {
-          await startTest(msg.payload.url, msg.payload.configId);
-        }
-        return { success: true };
-
-      case MessageType.STOP_TEST: {
-        const result = await stopTest();
-        return { success: true, testRun: result };
+      // Update run stats periodically
+      if (idx % 5 === 0) {
+        await api.updateRunStats(runId, {
+          pagesFound: scanState.pagesFound,
+          pageStatesFound: scanState.pageStatesFound,
+          actionsCompleted: scanState.actionsCompleted,
+        });
       }
 
-      case MessageType.TEST_STATUS:
-        return {
-          isRunning: testState.isRunning,
-          currentTestRun: testState.currentTestRun,
-          currentStep: testState.currentStep,
-          logs: testState.logs,
-        };
-
-      default:
-        return { success: true };
+      sendProgressToSidePanel();
     }
+
+    // Mark run as completed
+    scanState.phase = "completed";
+    scanState.isComplete = true;
+    await api.completeRun(runId);
+    addEvent("run_completed", `Completed with ${scanState.actionsCompleted} actions`);
+  } catch (err: unknown) {
+    scanState.phase = "failed";
+    scanState.isComplete = true;
+    const message = err instanceof Error ? err.message : "Scan failed";
+    addEvent("error", message);
+    chrome.runtime.sendMessage({ type: "SCAN_ERROR", error: message });
+  } finally {
+    scanState.isRunning = false;
+    sendProgressToSidePanel();
   }
-);
+}
 
-// Extension install event
-browser.runtime.onInstalled.addListener(
-  (details: Runtime.OnInstalledDetailsType) => {
-    log(`Extension installed: ${details.reason}`);
+// ============================================================================
+// Message Handlers
+// ============================================================================
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type === "START_SCAN" && message.url) {
+    runScan(message.url);
+    sendResponse({ ok: true });
+  } else if (message.type === "STOP_SCAN") {
+    scanState.isRunning = false;
+    scanState.isComplete = true;
+    scanState.phase = "stopped";
+    addEvent("stopped", "Scan stopped by user");
+    sendResponse({ ok: true });
+  } else if (message.type === "GET_STATUS") {
+    sendResponse({ ...scanState });
+  } else if (message.type === "SAVE_CONFIG") {
+    chrome.storage.local.set({
+      apiUrl: message.apiUrl || apiUrl,
+      apiKey: message.apiKey || apiKey,
+    });
+    apiUrl = message.apiUrl || apiUrl;
+    apiKey = message.apiKey || apiKey;
+    sendResponse({ ok: true });
   }
-);
+  return true; // Keep message channel open for async
+});
 
-// Handle tab updates (navigation) during tests
-// Note: The test loop handles page changes internally via polling
-
-// Handle tab close during tests
-browser.tabs.onRemoved.addListener(tabId => {
-  if (tabId === testState.tabId && testState.isRunning) {
-    log('Test tab closed, stopping test');
-    stopTest();
+// Open side panel when extension icon is clicked
+chrome.action.onClicked.addListener(async (tab) => {
+  if (tab.id) {
+    await chrome.sidePanel.open({ tabId: tab.id });
   }
 });
 
-console.log('[Testomniac] Background service worker ready');
+// Load config on startup
+loadConfig();

@@ -33,9 +33,9 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
-        '@shared': path.resolve(__dirname, './src/shared'),
         '@background': path.resolve(__dirname, './src/background'),
-        '@popup': path.resolve(__dirname, './src/popup'),
+        // Shim node:crypto for browser — the extension uses SubtleCrypto directly
+        'node:crypto': path.resolve(__dirname, './src/shims/crypto.ts'),
       },
       dedupe: ['react', 'react-dom'],
     },
@@ -50,7 +50,6 @@ export default defineConfig(({ mode }) => {
     build: {
       rollupOptions: {
         input: {
-          popup: path.resolve(__dirname, 'src/popup/index.html'),
           sidepanel: path.resolve(__dirname, 'src/sidepanel/index.html'),
         },
         output: {

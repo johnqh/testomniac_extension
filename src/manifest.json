@@ -25,7 +25,6 @@
     "type": "module"
   },
   "action": {
-    "default_popup": "src/popup/index.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png",
@@ -39,13 +38,6 @@
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
-  "content_scripts": [
-    {
-      "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
-      "js": ["src/content/index.ts"],
-      "run_at": "document_idle"
-    }
-  ],
   "content_security_policy": {
     "extension_pages": "default-src 'self'; script-src 'self'; object-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:* http://127.0.0.1:* https://*"
   }

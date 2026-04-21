@@ -21,9 +21,7 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"],
-      "@shared/*": ["./src/shared/*"],
-      "@background/*": ["./src/background/*"],
-      "@popup/*": ["./src/popup/*"]
+      "@background/*": ["./src/background/*"]
     }
   },
   "include": ["src"],
