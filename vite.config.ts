@@ -62,6 +62,7 @@ export default defineConfig(({ mode }) => {
         'react/jsx-dev-runtime',
         'firebase/app',
         'firebase/auth',
+        '@sudobility/testomniac_scanning_service',
       ],
     },
     server: {
