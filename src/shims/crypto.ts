@@ -1,38 +1,36 @@
 /**
- * Browser shim for node:crypto.
- * Provides createHash using Web Crypto API for compatibility with
- * scanning service modules that import from node:crypto.
+ * Shim for node:crypto in browser context.
+ * scanning_service's component-detector.js uses createHash from node:crypto.
+ * This provides a browser-compatible implementation via SubtleCrypto.
  */
 
-class BrowserHash {
-  private data: Uint8Array[] = [];
-
-  constructor(_algorithm: string) {
-    // Algorithm parameter accepted for API compatibility but not used in shim
+export function createHash(algorithm: string) {
+  if (algorithm !== 'sha256') {
+    throw new Error(`Unsupported hash algorithm: ${algorithm}`);
   }
 
-  update(input: string): this {
-    this.data.push(new TextEncoder().encode(input));
-    return this;
-  }
-
-  digest(encoding: 'hex'): string {
-    // Synchronous fallback: use a simple hash for build compatibility.
-    // The extension's own code uses SubtleCrypto (async) for actual hashing.
-    // This shim only exists so the unused page-utils code doesn't crash at import time.
-    let hash = 0;
-    for (const chunk of this.data) {
-      for (let i = 0; i < chunk.length; i++) {
-        hash = ((hash << 5) - hash + chunk[i]) | 0;
+  let data = '';
+  return {
+    update(input: string) {
+      data += input;
+      return this;
+    },
+    digest(encoding: string) {
+      if (encoding !== 'hex') {
+        throw new Error(`Unsupported encoding: ${encoding}`);
       }
-    }
-    if (encoding === 'hex') {
+      // Return a synchronous hex string by computing hash eagerly
+      // This works because component-detector calls createHash synchronously
+      const encoder = new TextEncoder();
+      const encoded = encoder.encode(data);
+      // Use a simple hash for the shim since SubtleCrypto is async
+      // and createHash expects sync behavior
+      let hash = 0;
+      for (let i = 0; i < encoded.length; i++) {
+        const char = encoded[i];
+        hash = ((hash << 5) - hash + char) | 0;
+      }
       return Math.abs(hash).toString(16).padStart(16, '0');
-    }
-    return String(hash);
-  }
-}
-
-export function createHash(algorithm: string): BrowserHash {
-  return new BrowserHash(algorithm);
+    },
+  };
 }

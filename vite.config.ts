@@ -40,7 +40,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
         '@background': path.resolve(__dirname, './src/background'),
-        // Shim node:crypto for browser — the extension uses SubtleCrypto directly
+        // Shim node:crypto for browser — scanning_service uses it for hashing
         'node:crypto': path.resolve(__dirname, './src/shims/crypto.ts'),
         // Stub out optional dependencies not needed in the extension
         '@sudobility/devops-components': path.resolve(
