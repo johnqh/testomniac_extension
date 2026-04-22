@@ -839,536 +839,619 @@ async function runScan(url: string, runId: number) {
       if (visitedPages.has(normalizedCurrentUrl)) continue;
       visitedPages.add(normalizedCurrentUrl);
 
-      // Navigate to this page (skip if already there)
-      const currentActualUrl = await adapter.getUrl();
-      if (currentActualUrl.split('#')[0] !== normalizedCurrentUrl) {
-        LOG(`Navigating to queued page: ${currentPageUrl}`);
-        await adapter.goto(currentPageUrl, { timeout: 30000 });
-        await sleep(1000);
+      // Skip non-browsable action URLs (addtocart, mailto, etc.)
+      try {
+        const qUrl = new URL(currentPageUrl);
+        if (
+          qUrl.searchParams.has('ec_action') ||
+          qUrl.protocol === 'mailto:' ||
+          qUrl.protocol === 'javascript:' ||
+          qUrl.pathname.endsWith('.log') ||
+          qUrl.pathname.endsWith('.pdf')
+        ) {
+          LOG(`Skipping non-browsable URL: ${currentPageUrl}`);
+          continue;
+        }
+      } catch {
+        continue;
       }
 
-      scanState.currentPageUrl = await adapter.getUrl();
-      LOG(`\n========== SCANNING PAGE: ${scanState.currentPageUrl} ==========`);
-      addEvent('navigate', scanState.currentPageUrl);
+      try {
+        // Navigate to this page (skip if already there)
+        const currentActualUrl = await adapter.getUrl();
+        if (currentActualUrl.split('#')[0] !== normalizedCurrentUrl) {
+          LOG(`Navigating to queued page: ${currentPageUrl}`);
+          await adapter.goto(currentPageUrl, { timeout: 30000 });
+          await sleep(1000);
+        }
 
-      // Create page record in API
-      const page =
-        api && appId
-          ? await api.findOrCreatePage(appId, scanState.currentPageUrl)
-          : null;
-      LOG(
-        'Page record:',
-        page ? { id: page.id, url: page.url } : 'skipped (no API)'
-      );
-      scanState.pagesFound++;
-      addEvent('page_discovered', scanState.currentPageUrl);
+        // Verify we're on a web page (not chrome-extension://, etc.)
+        const verifiedUrl = await adapter.getUrl();
+        if (
+          !verifiedUrl.startsWith('http://') &&
+          !verifiedUrl.startsWith('https://')
+        ) {
+          LOG(`Landed on non-web URL: ${verifiedUrl}, skipping page`);
+          addEvent('warning', `Skipped non-web URL: ${verifiedUrl}`);
+          await adapter.goto(url, { timeout: 30000 });
+          continue;
+        }
 
-      // Extract elements
-      LOG('Extracting elements...');
-      LOG(
-        `Extracting elements with focused extractors: ${getRegisteredExtractorNames().join(', ')}`
-      );
-      const items = await extractActionableItems(adapter);
-      const visible = items.filter(i => i.visible);
-      const clickable = visible.filter(
-        i => !i.disabled && i.actionKind !== 'fill'
-      );
-      LOG(
-        `Items: ${items.length} total, ${visible.length} visible, ${clickable.length} clickable`
-      );
+        scanState.currentPageUrl = verifiedUrl;
+        LOG(
+          `\n========== SCANNING PAGE: ${scanState.currentPageUrl} ==========`
+        );
+        addEvent('navigate', scanState.currentPageUrl);
 
-      LOG('Getting page HTML...');
-      const html = await adapter.content();
-      LOG(`HTML length: ${html.length}`);
+        // Create page record in API
+        const page =
+          api && appId
+            ? await api.findOrCreatePage(appId, scanState.currentPageUrl)
+            : null;
+        LOG(
+          'Page record:',
+          page ? { id: page.id, url: page.url } : 'skipped (no API)'
+        );
+        scanState.pagesFound++;
+        addEvent('page_discovered', scanState.currentPageUrl);
 
-      LOG('Computing hashes...');
-      const hashes = await computeHashes(html, items);
+        // Extract elements
+        LOG('Extracting elements...');
+        LOG(
+          `Extracting elements with focused extractors: ${getRegisteredExtractorNames().join(', ')}`
+        );
+        const items = await extractActionableItems(adapter);
+        const visible = items.filter(i => i.visible);
+        const clickable = visible.filter(
+          i => !i.disabled && i.actionKind !== 'fill'
+        );
+        LOG(
+          `Items: ${items.length} total, ${visible.length} visible, ${clickable.length} clickable`
+        );
 
-      // Take screenshot
-      LOG('Taking screenshot...');
-      const screenshotData = await adapter.screenshot({
-        type: 'jpeg',
-        quality: SCREENSHOT_QUALITY,
-      });
-      LOG(`Screenshot: ${screenshotData.length} bytes`);
-      const screenshotBase64 = uint8ToBase64(screenshotData);
-      scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${screenshotBase64}`;
-      LOG('Screenshot converted to data URL');
-      sendProgressToSidePanel();
+        LOG('Getting page HTML...');
+        const html = await adapter.content();
+        LOG(`HTML length: ${html.length}`);
 
-      // Create page state in API
-      let pageStateId: number | null = null;
-      if (api && page) {
-        LOG('Creating page state in API...');
-        const contentText = await adapter.evaluate(
+        LOG('Computing hashes...');
+        const hashes = await computeHashes(html, items);
+
+        // Take screenshot
+        LOG('Taking screenshot...');
+        const screenshotData = await adapter.screenshot({
+          type: 'jpeg',
+          quality: SCREENSHOT_QUALITY,
+        });
+        LOG(`Screenshot: ${screenshotData.length} bytes`);
+        const screenshotBase64 = uint8ToBase64(screenshotData);
+        scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${screenshotBase64}`;
+        LOG('Screenshot converted to data URL');
+        sendProgressToSidePanel();
+
+        // Create page state in API
+        let pageStateId: number | null = null;
+        if (api && page) {
+          LOG('Creating page state in API...');
+          const contentText = await adapter.evaluate(
+            () => document.body.innerText || ''
+          );
+          LOG(`Content text: ${(contentText as string).length} chars`);
+          const pageState = await api.createPageState({
+            pageId: page.id,
+            sizeClass: 'desktop',
+            hashes,
+            screenshotPath: '',
+            contentText: contentText as string,
+          });
+          pageStateId = pageState.id;
+          LOG(`Page state created: ${pageStateId}`);
+          await api.insertActionableItems(pageState.id, items);
+          LOG(`Inserted ${items.length} actionable items`);
+        }
+        scanState.pageStatesFound++;
+        addEvent('state_captured', `${items.length} elements found`);
+
+        // Proactively enqueue pages from extracted navigate-action hrefs
+        // so we don't miss pages we happen not to click.
+        for (const item of items) {
+          if (item.actionKind !== 'navigate' || !item.href) continue;
+          try {
+            const target = new URL(item.href, currentPageUrl);
+            if (target.origin !== startOrigin) continue;
+            // Skip anchors (#), javascript:, mailto:, and action URLs
+            if (target.protocol !== 'http:' && target.protocol !== 'https:')
+              continue;
+            if (target.searchParams.has('ec_action')) continue;
+            if (
+              target.pathname.endsWith('.log') ||
+              target.pathname.endsWith('.pdf')
+            )
+              continue;
+            const normalized = target.href.split('#')[0];
+            if (
+              !visitedPages.has(normalized) &&
+              !pageQueue.includes(target.href)
+            ) {
+              pageQueue.push(target.href);
+            }
+          } catch {
+            // Invalid URL, skip
+          }
+        }
+        LOG(`Page queue after href scan: ${pageQueue.length} pending`);
+
+        // === Bug Detection Phase ===
+        LOG('Running bug detectors on page...');
+
+        // 1. Check links on this page
+        const linkResults = await detectBrokenLinks(adapter, currentPageUrl);
+        for (const broken of linkResults) {
+          scanState.issuesFound++;
+          addEvent(
+            'bug',
+            `Broken link: "${broken.text}" → ${broken.href} (${broken.error})`
+          );
+        }
+
+        // 2. Visual checks
+        const visualIssues = detectVisualIssues(html);
+        for (const issue of visualIssues) {
+          scanState.issuesFound++;
+          addEvent('bug', `${issue.type}: ${issue.description}`);
+        }
+
+        // 3. Media checks
+        const mediaIssues = await detectMediaIssues(adapter);
+        for (const issue of mediaIssues) {
+          scanState.issuesFound++;
+          addEvent('bug', `${issue.type}: ${issue.description}`);
+        }
+
+        // 4. Content checks
+        const contentText2 = await adapter.evaluate(
           () => document.body.innerText || ''
         );
-        LOG(`Content text: ${(contentText as string).length} chars`);
-        const pageState = await api.createPageState({
-          pageId: page.id,
-          sizeClass: 'desktop',
-          hashes,
-          screenshotPath: '',
-          contentText: contentText as string,
-        });
-        pageStateId = pageState.id;
-        LOG(`Page state created: ${pageStateId}`);
-        await api.insertActionableItems(pageState.id, items);
-        LOG(`Inserted ${items.length} actionable items`);
-      }
-      scanState.pageStatesFound++;
-      addEvent('state_captured', `${items.length} elements found`);
-
-      // Proactively enqueue pages from extracted navigate-action hrefs
-      // so we don't miss pages we happen not to click.
-      for (const item of items) {
-        if (item.actionKind !== 'navigate' || !item.href) continue;
-        try {
-          const target = new URL(item.href, currentPageUrl);
-          if (target.origin !== startOrigin) continue;
-          // Skip anchors (#), javascript:, and mailto:
-          if (target.protocol !== 'http:' && target.protocol !== 'https:')
-            continue;
-          const normalized = target.href.split('#')[0];
-          if (
-            !visitedPages.has(normalized) &&
-            !pageQueue.includes(target.href)
-          ) {
-            pageQueue.push(target.href);
-          }
-        } catch {
-          // Invalid URL, skip
-        }
-      }
-      LOG(`Page queue after href scan: ${pageQueue.length} pending`);
-
-      // === Bug Detection Phase ===
-      LOG('Running bug detectors on page...');
-
-      // 1. Check links on this page
-      const linkResults = await detectBrokenLinks(adapter, currentPageUrl);
-      for (const broken of linkResults) {
-        scanState.issuesFound++;
-        addEvent(
-          'bug',
-          `Broken link: "${broken.text}" → ${broken.href} (${broken.error})`
-        );
-      }
-
-      // 2. Visual checks
-      const visualIssues = detectVisualIssues(html);
-      for (const issue of visualIssues) {
-        scanState.issuesFound++;
-        addEvent('bug', `${issue.type}: ${issue.description}`);
-      }
-
-      // 3. Media checks
-      const mediaIssues = await detectMediaIssues(adapter);
-      for (const issue of mediaIssues) {
-        scanState.issuesFound++;
-        addEvent('bug', `${issue.type}: ${issue.description}`);
-      }
-
-      // 4. Content checks
-      const contentText2 = await adapter.evaluate(
-        () => document.body.innerText || ''
-      );
-      const contentIssues = detectContentIssues(contentText2 as string);
-      for (const issue of contentIssues) {
-        scanState.issuesFound++;
-        addEvent('bug', `${issue.type}: ${issue.description}`);
-      }
-
-      LOG(`Bug detection complete: ${scanState.issuesFound} issues found`);
-
-      // Process visible actionable items, including form fields.
-      const clickableItems = items
-        .filter(i => i.visible && !i.disabled)
-        .sort((a, b) => getActionPriority(a) - getActionPriority(b));
-      LOG(
-        `\n========== SCANNING ${clickableItems.length} CLICKABLE ITEMS ==========`
-      );
-      const handledRadioGroups = new Set<string>();
-
-      for (
-        let idx = 0;
-        idx < clickableItems.length && scanState.isRunning;
-        idx++
-      ) {
-        const item = clickableItems[idx];
-        if (!item.selector) {
-          LOG(`[${idx}] Skipping — no selector`);
-          continue;
+        const contentIssues = detectContentIssues(contentText2 as string);
+        for (const issue of contentIssues) {
+          scanState.issuesFound++;
+          addEvent('bug', `${issue.type}: ${issue.description}`);
         }
 
-        const itemInfo = [
-          `<${item.tagName?.toLowerCase()}>`,
-          item.textContent ? `"${item.textContent.slice(0, 40)}"` : '',
-          item.href ? `→ ${item.href}` : '',
-          `(${item.actionKind})`,
-        ]
-          .filter(Boolean)
-          .join(' ');
+        LOG(`Bug detection complete: ${scanState.issuesFound} issues found`);
 
-        LOG(`\n--- [${idx + 1}/${clickableItems.length}] ${itemInfo} ---`);
-        LOG(`  selector: ${item.selector}`);
+        // Process visible actionable items, including form fields.
+        const clickableItems = items
+          .filter(i => i.visible && !i.disabled)
+          .sort((a, b) => getActionPriority(a) - getActionPriority(b));
         LOG(
-          `  position: (${Math.round(item.x || 0)}, ${Math.round(item.y || 0)}) ${Math.round(item.width || 0)}x${Math.round(item.height || 0)}`
+          `\n========== SCANNING ${clickableItems.length} CLICKABLE ITEMS ==========`
         );
+        const handledRadioGroups = new Set<string>();
 
-        // Re-tag the element (page may have reloaded, losing data-tmnc-id)
-        const retagged = await adapter.evaluate(
-          (...args: unknown[]) => {
-            const sel = args[0] as string;
-            const href = args[1] as string | undefined;
-            const text = args[2] as string | undefined;
-            const tag = args[3] as string | undefined;
-            const match = sel.match(/\[data-tmnc-id="([^"]+)"\]/);
-            const uid = match?.[1];
+        for (
+          let idx = 0;
+          idx < clickableItems.length && scanState.isRunning;
+          idx++
+        ) {
+          const item = clickableItems[idx];
+          if (!item.selector) {
+            LOG(`[${idx}] Skipping — no selector`);
+            continue;
+          }
 
-            // First try the original selector
-            const el = document.querySelector(sel);
-            if (el) {
-              if (uid) {
-                el.setAttribute('data-tmnc-id', uid);
+          const itemInfo = [
+            `<${item.tagName?.toLowerCase()}>`,
+            item.textContent ? `"${item.textContent.slice(0, 40)}"` : '',
+            item.href ? `→ ${item.href}` : '',
+            `(${item.actionKind})`,
+          ]
+            .filter(Boolean)
+            .join(' ');
+
+          LOG(`\n--- [${idx + 1}/${clickableItems.length}] ${itemInfo} ---`);
+          LOG(`  selector: ${item.selector}`);
+          LOG(
+            `  position: (${Math.round(item.x || 0)}, ${Math.round(item.y || 0)}) ${Math.round(item.width || 0)}x${Math.round(item.height || 0)}`
+          );
+
+          // Re-tag the element (page may have reloaded, losing data-tmnc-id)
+          const retagged = await adapter.evaluate(
+            (...args: unknown[]) => {
+              const sel = args[0] as string;
+              const href = args[1] as string | undefined;
+              const text = args[2] as string | undefined;
+              const tag = args[3] as string | undefined;
+              const match = sel.match(/\[data-tmnc-id="([^"]+)"\]/);
+              const uid = match?.[1];
+
+              // First try the original selector
+              const el = document.querySelector(sel);
+              if (el) {
+                if (uid) {
+                  el.setAttribute('data-tmnc-id', uid);
+                }
+                return true;
               }
-              return true;
-            }
 
-            // If not found, try to locate by href + text
-            if (uid && href && tag) {
-              const candidates = document.querySelectorAll(tag.toLowerCase());
-              for (const c of candidates) {
-                const cHref =
-                  (c as HTMLAnchorElement).href || c.getAttribute('href') || '';
-                const cText = c.textContent?.trim().slice(0, 80) || '';
-                if (cHref === href || (text && cText === text)) {
-                  c.setAttribute('data-tmnc-id', uid);
-                  return true;
+              // If not found, try to locate by href + text
+              if (uid && href && tag) {
+                const candidates = document.querySelectorAll(tag.toLowerCase());
+                for (const c of candidates) {
+                  const cHref =
+                    (c as HTMLAnchorElement).href ||
+                    c.getAttribute('href') ||
+                    '';
+                  const cText = c.textContent?.trim().slice(0, 80) || '';
+                  if (cHref === href || (text && cText === text)) {
+                    c.setAttribute('data-tmnc-id', uid);
+                    return true;
+                  }
                 }
               }
-            }
-            return false;
-          },
-          item.selector,
-          item.href,
-          item.textContent,
-          item.tagName
-        );
+              return false;
+            },
+            item.selector,
+            item.href,
+            item.textContent,
+            item.tagName
+          );
 
-        if (!retagged) {
-          LOG(`  Element not found on page, skipping`);
-          addEvent('warning', `Element not found: ${itemInfo}`);
-          continue;
-        }
-
-        // Mouseover
-        try {
-          LOG(`  Hovering...`);
-          addEvent('mouseover', itemInfo);
-          await adapter.hover(item.selector, { timeout: 3000 });
-          LOG(`  Hover done, waiting ${HOVER_DELAY_MS}ms...`);
-          await new Promise(r => setTimeout(r, HOVER_DELAY_MS));
-
-          // Check if hover triggered a modal/popup
-          const hoverModal = await detectAndHandleModal(adapter);
-          if (hoverModal.found) {
-            LOG(
-              `  Modal detected after hover: ${hoverModal.content?.slice(0, 80)}`
-            );
-            addEvent(
-              'modal',
-              `Hover triggered modal: ${hoverModal.content?.slice(0, 60) || 'unknown'}`
-            );
-            // Dismiss the modal before continuing
-            await dismissModal(adapter);
-            LOG(`  Modal dismissed`);
+          if (!retagged) {
+            LOG(`  Element not found on page, skipping`);
+            addEvent('warning', `Element not found: ${itemInfo}`);
+            continue;
           }
-        } catch (e) {
-          WARN(`  Could not hover:`, e);
-          addEvent('warning', `Could not hover ${itemInfo}`);
-          continue;
-        }
 
-        // Record action in API
-        if (api) {
-          LOG('  Recording mouseover action in API...');
-          await api.createAction({
-            runId,
-            type: 'mouseover',
-            actionableItemId: undefined,
-            startingPageStateId: pageStateId ?? undefined,
-            sizeClass: 'desktop',
-          });
-        }
-        scanState.actionsCompleted++;
+          // Mouseover
+          try {
+            LOG(`  Hovering...`);
+            addEvent('mouseover', itemInfo);
+            await adapter.hover(item.selector, { timeout: 3000 });
+            LOG(`  Hover done, waiting ${HOVER_DELAY_MS}ms...`);
+            await new Promise(r => setTimeout(r, HOVER_DELAY_MS));
 
-        // Dismiss any open modal before performing action
-        const preActionModal = await detectAndHandleModal(adapter);
-        if (preActionModal.found) {
-          LOG(`  Dismissing open modal before action...`);
-          await dismissModal(adapter);
-          await new Promise(r => setTimeout(r, 300));
-        }
-
-        // Perform action
-        try {
-          const beforeUrl = await adapter.getUrl();
-          const beforeText = (await adapter.evaluate(
-            () => document.body.innerText || ''
-          )) as string;
-          if (item.actionKind === 'fill') {
-            const value = fillValuePlanner.planValue(item);
-            LOG(`  Filling with "${value}"`);
-            addEvent('fill', `${itemInfo} = ${value}`);
-            await adapter.type(item.selector, value);
-            if (looksLikeEnterCommitField(item)) {
-              LOG('  Committing text entry with Enter');
-              await adapter.submitTextEntry(item.selector);
-            }
-          } else if (item.actionKind === 'select') {
-            const values = await pickSelectValues(adapter, item.selector);
-            if (values.length === 0) {
-              const fallbackValue = await pickSelectValue(
-                adapter,
-                item.selector
+            // Check if hover triggered a modal/popup
+            const hoverModal = await detectAndHandleModal(adapter);
+            if (hoverModal.found) {
+              LOG(
+                `  Modal detected after hover: ${hoverModal.content?.slice(0, 80)}`
               );
-              if (fallbackValue) values.push(fallbackValue);
-            }
-
-            if (values.length === 0) {
-              LOG('  No suitable option found, skipping');
-              addEvent('warning', `No option to select for ${itemInfo}`);
-              continue;
-            }
-
-            for (const value of values) {
-              LOG(`  Selecting "${value}"`);
-              addEvent('select', `${itemInfo} = ${value}`);
-              await adapter.select(item.selector, value);
-              await new Promise(r => setTimeout(r, 300));
-            }
-          } else if (item.actionKind === 'toggle') {
-            const inputType = (item.inputType || '').toLowerCase();
-            if (inputType === 'radio') {
-              const groupName = await getInputName(adapter, item.selector);
-              if (groupName && handledRadioGroups.has(groupName)) {
-                LOG(`  Radio group "${groupName}" already handled, skipping`);
-                continue;
-              }
-              if (groupName) handledRadioGroups.add(groupName);
-            } else {
-              const checked = await isToggleChecked(adapter, item.selector);
-              if (checked) {
-                LOG('  Already checked, skipping');
-                addEvent('warning', `Already toggled ${itemInfo}`);
-                continue;
-              }
-            }
-            LOG(`  Toggling... (current URL: ${beforeUrl.slice(0, 60)})`);
-            addEvent('toggle', itemInfo);
-            await adapter.click(item.selector, { timeout: 3000 });
-          } else {
-            LOG(`  Clicking... (current URL: ${beforeUrl.slice(0, 60)})`);
-            addEvent('click', itemInfo);
-            await adapter.click(item.selector, { timeout: 3000 });
-          }
-
-          LOG(`  Action done, waiting for page to settle...`);
-          const settleStart = Date.now();
-          // Wait for potential navigation to complete
-          await adapter.waitForNavigation({ timeout: 3000 }).catch(() => {});
-          const minimumSettleMs = POST_ACTION_SETTLE_MS;
-          const remainingSettleMs = Math.max(
-            0,
-            minimumSettleMs - (Date.now() - settleStart)
-          );
-          LOG(
-            `  Settling for ${minimumSettleMs}ms minimum (${remainingSettleMs}ms remaining after navigation wait)`
-          );
-          await sleep(remainingSettleMs);
-
-          // Check if click triggered a modal/popup
-          const clickModal = await detectAndHandleModal(adapter);
-          if (clickModal.found) {
-            LOG(
-              `  Modal detected after click: ${clickModal.content?.slice(0, 80)}`
-            );
-            addEvent(
-              'modal',
-              `Click triggered modal: ${clickModal.content?.slice(0, 60) || 'unknown'}`
-            );
-
-            // Extract any links/actions from the modal content
-            const modalContent = clickModal.content || '';
-            if (modalContent.length > 10) {
-              const mContentIssues = detectContentIssues(modalContent);
-              for (const issue of mContentIssues) {
-                scanState.issuesFound++;
-                addEvent('bug', `Modal ${issue.type}: ${issue.description}`);
-              }
-            }
-
-            // Dismiss modal before continuing
-            await dismissModal(adapter);
-            LOG(`  Modal dismissed`);
-            await new Promise(r => setTimeout(r, 300));
-          }
-
-          // Check if the click opened a new tab (target="_blank" etc.)
-          const allTabs = await chrome.tabs.query({
-            currentWindow: true,
-          });
-          const newTabs = allTabs.filter(
-            t => t.id !== adapter.tabId && t.id !== undefined
-          );
-          // If a new tab appeared and our tab is no longer active, a
-          // target="_blank" link likely opened it. Close the new tab
-          // and re-activate ours.
-          for (const nt of newTabs) {
-            if (nt.active && nt.id !== adapter.tabId && nt.id !== undefined) {
-              LOG(`  New tab opened (${nt.url?.slice(0, 60)}), closing it`);
               addEvent(
-                'new_tab_closed',
-                `Closed tab: ${nt.url?.slice(0, 60) || 'unknown'}`
+                'modal',
+                `Hover triggered modal: ${hoverModal.content?.slice(0, 60) || 'unknown'}`
               );
-              await chrome.tabs.remove(nt.id);
-              await chrome.tabs.update(adapter.tabId, { active: true });
-              break;
+              // Dismiss the modal before continuing
+              await dismissModal(adapter);
+              LOG(`  Modal dismissed`);
             }
-          }
-
-          const afterUrl = await adapter.getUrl();
-          LOG(`  After URL: ${afterUrl.slice(0, 60)}`);
-          scanState.currentPageUrl = afterUrl;
-          sendProgressToSidePanel();
-
-          // Check if navigated to a non-web page (devtools, chrome://, etc.)
-          if (
-            !afterUrl.startsWith('http://') &&
-            !afterUrl.startsWith('https://')
-          ) {
-            LOG(`  NON-WEB PAGE: ${afterUrl} — navigating back`);
-            addEvent('warning', `Navigated to ${afterUrl}, going back`);
-            await adapter.goto(currentPageUrl, { timeout: 30000 });
+          } catch (e) {
+            WARN(`  Could not hover:`, e);
+            addEvent('warning', `Could not hover ${itemInfo}`);
             continue;
           }
 
-          // Check for cross-origin navigation
-          if (new URL(afterUrl).origin !== startOrigin) {
-            LOG(`  CROSS-ORIGIN: ${afterUrl} — navigating back`);
-            addEvent('cross_origin', `Navigated to ${afterUrl}, going back`);
-            await adapter.goto(currentPageUrl, { timeout: 30000 });
-            continue;
-          }
-
-          // Check if URL changed (new page discovered)
-          const normalizedAfter = afterUrl.split('#')[0];
-          const normalizedBefore = beforeUrl.split('#')[0];
-          if (normalizedAfter !== normalizedBefore) {
-            LOG(`  NEW PAGE: ${afterUrl}`);
-            addEvent('page_discovered', afterUrl);
-            if (api && appId) {
-              await api.findOrCreatePage(appId, afterUrl);
-            }
-
-            // Enqueue the new page for later processing and go back
-            if (!visitedPages.has(normalizedAfter)) {
-              pageQueue.push(afterUrl);
-              LOG(`  Enqueued for later, navigating back to ${currentPageUrl}`);
-            }
-            await adapter.goto(currentPageUrl, { timeout: 30000 });
-            await sleep(500);
-          } else {
-            LOG('  Same page (no navigation)');
-          }
-
-          // Take screenshot after action
-          LOG('  Taking post-action screenshot...');
-          const newScreenshot = await adapter.screenshot({
-            type: 'jpeg',
-            quality: SCREENSHOT_QUALITY,
-          });
-          const newBase64 = uint8ToBase64(newScreenshot);
-          scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
-          sendProgressToSidePanel();
-
-          // Check if click led to an error page
-          const postClickText = (await adapter.evaluate(
-            () => document.body.innerText || ''
-          )) as string;
-          const postClickIssues = detectContentIssues(postClickText);
-          if (postClickIssues.some(i => i.type === 'error_page')) {
-            scanState.issuesFound++;
-            addEvent(
-              'bug',
-              `Click on "${item.textContent}" led to error page at ${afterUrl}`
-            );
-          }
-
-          const textChanged = postClickText.trim() !== beforeText.trim();
-
-          if (
-            shouldExpectNavigation(item, beforeUrl) &&
-            normalizedAfter === normalizedBefore &&
-            !textChanged
-          ) {
-            scanState.issuesFound++;
-            addEvent(
-              'bug',
-              `navigation_no_effect: Clicking "${item.textContent || item.accessibleName || item.href}" did not navigate or change page state`
-            );
-          }
-
-          if (
-            looksLikeSubmitAction(item) &&
-            normalizedAfter === normalizedBefore &&
-            !textChanged &&
-            !postClickIssues.some(i => i.type === 'error_page')
-          ) {
-            scanState.issuesFound++;
-            addEvent(
-              'bug',
-              `action_no_effect: "${item.textContent || item.accessibleName || 'submit action'}" did not change page state`
-            );
-          }
-
+          // Record action in API
           if (api) {
+            LOG('  Recording mouseover action in API...');
             await api.createAction({
               runId,
-              type:
-                item.actionKind === 'navigate' || item.actionKind === 'click'
-                  ? 'click'
-                  : item.actionKind,
+              type: 'mouseover',
+              actionableItemId: undefined,
               startingPageStateId: pageStateId ?? undefined,
               sizeClass: 'desktop',
             });
           }
           scanState.actionsCompleted++;
-          LOG(
-            `  Actions completed: ${scanState.actionsCompleted} (pages: ${scanState.pagesFound})`
-          );
-        } catch (e) {
-          WARN(`  Could not click:`, e);
-          addEvent('warning', `Could not click ${itemInfo}`);
+
+          // Dismiss any open modal before performing action
+          const preActionModal = await detectAndHandleModal(adapter);
+          if (preActionModal.found) {
+            LOG(`  Dismissing open modal before action...`);
+            await dismissModal(adapter);
+            await new Promise(r => setTimeout(r, 300));
+          }
+
+          // Perform action
+          try {
+            const beforeUrl = await adapter.getUrl();
+            const beforeText = (await adapter.evaluate(
+              () => document.body.innerText || ''
+            )) as string;
+            if (item.actionKind === 'fill') {
+              const value = fillValuePlanner.planValue(item);
+              LOG(`  Filling with "${value}"`);
+              addEvent('fill', `${itemInfo} = ${value}`);
+              await adapter.type(item.selector, value);
+              if (looksLikeEnterCommitField(item)) {
+                LOG('  Committing text entry with Enter');
+                await adapter.submitTextEntry(item.selector);
+              }
+            } else if (item.actionKind === 'select') {
+              const values = await pickSelectValues(adapter, item.selector);
+              if (values.length === 0) {
+                const fallbackValue = await pickSelectValue(
+                  adapter,
+                  item.selector
+                );
+                if (fallbackValue) values.push(fallbackValue);
+              }
+
+              if (values.length === 0) {
+                LOG('  No suitable option found, skipping');
+                addEvent('warning', `No option to select for ${itemInfo}`);
+                continue;
+              }
+
+              for (const value of values) {
+                LOG(`  Selecting "${value}"`);
+                addEvent('select', `${itemInfo} = ${value}`);
+                await adapter.select(item.selector, value);
+                await new Promise(r => setTimeout(r, 300));
+              }
+            } else if (item.actionKind === 'toggle') {
+              const inputType = (item.inputType || '').toLowerCase();
+              if (inputType === 'radio') {
+                const groupName = await getInputName(adapter, item.selector);
+                if (groupName && handledRadioGroups.has(groupName)) {
+                  LOG(`  Radio group "${groupName}" already handled, skipping`);
+                  continue;
+                }
+                if (groupName) handledRadioGroups.add(groupName);
+              } else {
+                const checked = await isToggleChecked(adapter, item.selector);
+                if (checked) {
+                  LOG('  Already checked, skipping');
+                  addEvent('warning', `Already toggled ${itemInfo}`);
+                  continue;
+                }
+              }
+              LOG(`  Toggling... (current URL: ${beforeUrl.slice(0, 60)})`);
+              addEvent('toggle', itemInfo);
+              await adapter.click(item.selector, { timeout: 3000 });
+            } else {
+              LOG(`  Clicking... (current URL: ${beforeUrl.slice(0, 60)})`);
+              addEvent('click', itemInfo);
+              await adapter.click(item.selector, { timeout: 3000 });
+            }
+
+            LOG(`  Action done, waiting for page to settle...`);
+            const settleStart = Date.now();
+            // Wait for potential navigation to complete
+            await adapter.waitForNavigation({ timeout: 3000 }).catch(() => {});
+            const minimumSettleMs = POST_ACTION_SETTLE_MS;
+            const remainingSettleMs = Math.max(
+              0,
+              minimumSettleMs - (Date.now() - settleStart)
+            );
+            LOG(
+              `  Settling for ${minimumSettleMs}ms minimum (${remainingSettleMs}ms remaining after navigation wait)`
+            );
+            await sleep(remainingSettleMs);
+
+            // Check if click triggered a modal/popup
+            const clickModal = await detectAndHandleModal(adapter);
+            if (clickModal.found) {
+              LOG(
+                `  Modal detected after click: ${clickModal.content?.slice(0, 80)}`
+              );
+              addEvent(
+                'modal',
+                `Click triggered modal: ${clickModal.content?.slice(0, 60) || 'unknown'}`
+              );
+
+              // Extract any links/actions from the modal content
+              const modalContent = clickModal.content || '';
+              if (modalContent.length > 10) {
+                const mContentIssues = detectContentIssues(modalContent);
+                for (const issue of mContentIssues) {
+                  scanState.issuesFound++;
+                  addEvent('bug', `Modal ${issue.type}: ${issue.description}`);
+                }
+              }
+
+              // Dismiss modal before continuing
+              await dismissModal(adapter);
+              LOG(`  Modal dismissed`);
+              await new Promise(r => setTimeout(r, 300));
+            }
+
+            // Check if the click opened a new tab (target="_blank" etc.)
+            const allTabs = await chrome.tabs.query({
+              currentWindow: true,
+            });
+            const newTabs = allTabs.filter(
+              t => t.id !== adapter.tabId && t.id !== undefined
+            );
+            // If a new tab appeared and our tab is no longer active, a
+            // target="_blank" link likely opened it. Close the new tab
+            // and re-activate ours.
+            for (const nt of newTabs) {
+              if (nt.active && nt.id !== adapter.tabId && nt.id !== undefined) {
+                LOG(`  New tab opened (${nt.url?.slice(0, 60)}), closing it`);
+                addEvent(
+                  'new_tab_closed',
+                  `Closed tab: ${nt.url?.slice(0, 60) || 'unknown'}`
+                );
+                await chrome.tabs.remove(nt.id);
+                await chrome.tabs.update(adapter.tabId, { active: true });
+                break;
+              }
+            }
+
+            const afterUrl = await adapter.getUrl();
+            LOG(`  After URL: ${afterUrl.slice(0, 60)}`);
+            scanState.currentPageUrl = afterUrl;
+            sendProgressToSidePanel();
+
+            // Check if navigated to a non-web page (devtools, chrome://, etc.)
+            if (
+              !afterUrl.startsWith('http://') &&
+              !afterUrl.startsWith('https://')
+            ) {
+              LOG(`  NON-WEB PAGE: ${afterUrl} — navigating back`);
+              addEvent('warning', `Navigated to ${afterUrl}, going back`);
+              await adapter.goto(currentPageUrl, { timeout: 30000 });
+              continue;
+            }
+
+            // Check for cross-origin navigation
+            if (new URL(afterUrl).origin !== startOrigin) {
+              LOG(`  CROSS-ORIGIN: ${afterUrl} — navigating back`);
+              addEvent('cross_origin', `Navigated to ${afterUrl}, going back`);
+              await adapter.goto(currentPageUrl, { timeout: 30000 });
+              continue;
+            }
+
+            // Check if URL changed (new page discovered)
+            const normalizedAfter = afterUrl.split('#')[0];
+            const normalizedBefore = beforeUrl.split('#')[0];
+            if (normalizedAfter !== normalizedBefore) {
+              LOG(`  NEW PAGE: ${afterUrl}`);
+              addEvent('page_discovered', afterUrl);
+              if (api && appId) {
+                await api.findOrCreatePage(appId, afterUrl);
+              }
+
+              // Enqueue the new page for later processing and go back
+              if (!visitedPages.has(normalizedAfter)) {
+                pageQueue.push(afterUrl);
+                LOG(
+                  `  Enqueued for later, navigating back to ${currentPageUrl}`
+                );
+              }
+              await adapter.goto(currentPageUrl, { timeout: 30000 });
+              await sleep(500);
+            } else {
+              LOG('  Same page (no navigation)');
+            }
+
+            // Take screenshot after action
+            LOG('  Taking post-action screenshot...');
+            const newScreenshot = await adapter.screenshot({
+              type: 'jpeg',
+              quality: SCREENSHOT_QUALITY,
+            });
+            const newBase64 = uint8ToBase64(newScreenshot);
+            scanState.latestScreenshotDataUrl = `data:image/jpeg;base64,${newBase64}`;
+            sendProgressToSidePanel();
+
+            // Check if click led to an error page
+            const postClickText = (await adapter.evaluate(
+              () => document.body.innerText || ''
+            )) as string;
+            const postClickIssues = detectContentIssues(postClickText);
+            if (postClickIssues.some(i => i.type === 'error_page')) {
+              scanState.issuesFound++;
+              addEvent(
+                'bug',
+                `Click on "${item.textContent}" led to error page at ${afterUrl}`
+              );
+            }
+
+            const textChanged = postClickText.trim() !== beforeText.trim();
+
+            if (
+              shouldExpectNavigation(item, beforeUrl) &&
+              normalizedAfter === normalizedBefore &&
+              !textChanged
+            ) {
+              scanState.issuesFound++;
+              addEvent(
+                'bug',
+                `navigation_no_effect: Clicking "${item.textContent || item.accessibleName || item.href}" did not navigate or change page state`
+              );
+            }
+
+            if (
+              looksLikeSubmitAction(item) &&
+              normalizedAfter === normalizedBefore &&
+              !textChanged &&
+              !postClickIssues.some(i => i.type === 'error_page')
+            ) {
+              scanState.issuesFound++;
+              addEvent(
+                'bug',
+                `action_no_effect: "${item.textContent || item.accessibleName || 'submit action'}" did not change page state`
+              );
+            }
+
+            // Create new page state if content changed on the same page
+            if (
+              textChanged &&
+              normalizedAfter === normalizedBefore &&
+              api &&
+              page
+            ) {
+              LOG('  Content changed — creating new page state');
+              const postItems = await extractActionableItems(adapter);
+              const postHtml = await adapter.content();
+              const postHashes = await computeHashes(postHtml, postItems);
+              const postState = await api.createPageState({
+                pageId: page.id,
+                sizeClass: 'desktop',
+                hashes: postHashes,
+                screenshotPath: '',
+                contentText: postClickText,
+              });
+              pageStateId = postState.id;
+              await api.insertActionableItems(postState.id, postItems);
+              scanState.pageStatesFound++;
+              addEvent(
+                'state_captured',
+                `New state after action: ${postItems.length} elements`
+              );
+              sendProgressToSidePanel();
+            }
+
+            if (api) {
+              await api.createAction({
+                runId,
+                type:
+                  item.actionKind === 'navigate' || item.actionKind === 'click'
+                    ? 'click'
+                    : item.actionKind,
+                startingPageStateId: pageStateId ?? undefined,
+                sizeClass: 'desktop',
+              });
+            }
+            scanState.actionsCompleted++;
+            LOG(
+              `  Actions completed: ${scanState.actionsCompleted} (pages: ${scanState.pagesFound})`
+            );
+          } catch (e) {
+            WARN(`  Could not click:`, e);
+            addEvent('warning', `Could not click ${itemInfo}`);
+          }
+
+          // Update run stats periodically
+          if (api && idx % 5 === 0) {
+            LOG('  Updating run stats in API...');
+            await api.updateRunStats(runId, {
+              pagesFound: scanState.pagesFound,
+              pageStatesFound: scanState.pageStatesFound,
+              actionsCompleted: scanState.actionsCompleted,
+            });
+          }
+
+          sendProgressToSidePanel();
         }
 
-        // Update run stats periodically
-        if (api && idx % 5 === 0) {
-          LOG('  Updating run stats in API...');
-          await api.updateRunStats(runId, {
-            pagesFound: scanState.pagesFound,
-            pageStatesFound: scanState.pageStatesFound,
-            actionsCompleted: scanState.actionsCompleted,
-          });
+        LOG(
+          `Finished page ${currentPageUrl} — ${pageQueue.length} page(s) remaining in queue`
+        );
+      } catch (pageErr) {
+        // One page failing should not stop the entire scan
+        const msg =
+          pageErr instanceof Error ? pageErr.message : 'Page scan failed';
+        WARN(`Page scan failed for ${currentPageUrl}:`, pageErr);
+        addEvent('warning', `Page error: ${msg.slice(0, 80)}`);
+        // Try to recover by navigating back to a known-good page
+        try {
+          await adapter.goto(url, { timeout: 15000 });
+        } catch {
+          // If even recovery navigation fails, continue to next page
         }
-
-        sendProgressToSidePanel();
       }
-
-      LOG(
-        `Finished page ${currentPageUrl} — ${pageQueue.length} page(s) remaining in queue`
-      );
     }
 
     // Mark run as completed

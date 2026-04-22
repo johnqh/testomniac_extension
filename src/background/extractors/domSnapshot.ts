@@ -221,7 +221,56 @@ export async function buildDomSnapshot(
         y: rect.y,
         width: rect.width,
         height: rect.height,
-        attributes: {},
+        attributes: (() => {
+          const attrs: Record<string, string> = {};
+          // Capture attributes useful for smart form filling
+          const placeholder =
+            el.getAttribute('placeholder') ||
+            (el as HTMLInputElement).placeholder;
+          if (placeholder) attrs.placeholder = placeholder;
+          const elName = el.getAttribute('name');
+          if (elName) attrs.name = elName;
+          const elId = el.getAttribute('id');
+          if (elId) attrs.id = elId;
+          const autocomplete = el.getAttribute('autocomplete');
+          if (autocomplete) attrs.autocomplete = autocomplete;
+          const pattern = el.getAttribute('pattern');
+          if (pattern) attrs.pattern = pattern;
+          // Find associated label text or nearby context
+          if (
+            el instanceof HTMLInputElement ||
+            el instanceof HTMLTextAreaElement ||
+            el instanceof HTMLSelectElement
+          ) {
+            const id2 = el.id;
+            if (id2) {
+              const label2 = document.querySelector(`label[for="${id2}"]`);
+              if (label2) {
+                attrs.labelText = label2.textContent?.trim().slice(0, 80) || '';
+              }
+            }
+            // Check parent/sibling for label context
+            if (!attrs.labelText) {
+              const parentLabel = el.closest('label');
+              if (parentLabel) {
+                attrs.labelText =
+                  parentLabel.textContent?.trim().slice(0, 80) || '';
+              }
+            }
+            if (!attrs.labelText) {
+              const prev = el.previousElementSibling;
+              if (
+                prev &&
+                (prev.tagName === 'LABEL' ||
+                  prev.tagName === 'SPAN' ||
+                  prev.tagName === 'DIV')
+              ) {
+                attrs.labelText = prev.textContent?.trim().slice(0, 80) || '';
+              }
+            }
+          }
+          return attrs;
+        })(),
         sourceHints: hints,
       });
     }
