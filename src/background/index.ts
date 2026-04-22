@@ -102,7 +102,7 @@ async function startScan(url: string, runId: number) {
   scanState.runId = runId;
   addEvent('scan_started', `Scanning ${url}`);
 
-  const api = apiKey ? new ApiClient(apiUrl + '/api/v1/scanner', apiKey) : null;
+  const api = apiKey ? new ApiClient(apiUrl, apiKey) : null;
 
   if (!api) {
     addEvent('error', 'No API key configured');
@@ -114,15 +114,13 @@ async function startScan(url: string, runId: number) {
   }
 
   try {
-    // Get app info from the pending run
-    const pendingRun = await api.getPendingRun();
-    if (pendingRun && pendingRun.id === runId) {
-      scanState.appId = pendingRun.appId;
+    // Get app info from this specific run
+    const run = await api.getRun(runId);
+    if (!run) {
+      throw new Error(`Run ${runId} not found`);
     }
-    const appId = scanState.appId;
-    if (!appId) {
-      throw new Error('Could not determine app ID for this run');
-    }
+    scanState.appId = run.appId;
+    const appId = run.appId;
 
     // Get or create a tab
     let [activeTab] = await chrome.tabs.query({
