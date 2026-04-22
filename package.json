@@ -1,6 +1,6 @@
 {
   "name": "testomniac_extension",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "AI-powered automated UI testing Chrome extension",
   "type": "module",
   "scripts": {
@@ -47,7 +47,7 @@
     "@sudobility/di_web": "^0.1.172",
     "@sudobility/testomniac_client": "^0.0.25",
     "@sudobility/testomniac_lib": "^0.0.24",
-    "@sudobility/testomniac_scanning_service": "^0.1.1",
+    "@sudobility/testomniac_scanning_service": "^0.1.2",
     "@sudobility/testomniac_types": "^0.0.21",
     "@sudobility/types": "^1.9.61",
     "@tanstack/react-query": "^5.90.5",
