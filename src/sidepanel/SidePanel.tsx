@@ -11,6 +11,18 @@ import { chromeGoogleSignIn } from './auth/googleSignIn';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
+interface EntityOption {
+  id: string;
+  entitySlug: string;
+  displayName: string;
+}
+
+interface ProjectOption {
+  id: number;
+  name: string;
+  entityId: string | null;
+}
+
 interface ScanProgress {
   phase: string;
   pagesFound: number;
@@ -48,6 +60,56 @@ export function SidePanel() {
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
 
+  // Entity & project selection
+  const [entities, setEntities] = useState<EntityOption[]>([]);
+  const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [loadingEntities, setLoadingEntities] = useState(false);
+  const [loadingProjects, setLoadingProjects] = useState(false);
+
+  // Fetch entities when authenticated
+  useEffect(() => {
+    if (!isAuthenticated || !token) return;
+    setLoadingEntities(true);
+    fetch(`${API_URL}/api/v1/entities`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+          setEntities(data.data);
+          if (data.data.length > 0 && !selectedEntityId) {
+            setSelectedEntityId(data.data[0].id);
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingEntities(false));
+  }, [isAuthenticated, token]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch projects when entity is selected
+  useEffect(() => {
+    if (!selectedEntityId || !token) {
+      setProjects([]);
+      return;
+    }
+    const entity = entities.find(e => e.id === selectedEntityId);
+    if (!entity) return;
+    setLoadingProjects(true);
+    fetch(`${API_URL}/api/v1/entities/${entity.entitySlug}/projects`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.data)) {
+          setProjects(data.data);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setLoadingProjects(false));
+  }, [selectedEntityId, token, entities]);
+
   // Get active tab URL
   useEffect(() => {
     async function getActiveTab() {
@@ -82,44 +144,104 @@ export function SidePanel() {
     };
   }, []);
 
-  // Submit current page URL to API (same as testomniac_app HomePage)
+  // Submit: create/select project → create/reuse app → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
-    if (!activeTabUrl) return;
+    if (!activeTabUrl || !token || !selectedEntityId) return;
     setError(null);
     setIsSubmitting(true);
+
     try {
-      const response = await fetch(`${API_URL}/api/v1/scan`, {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+
+      let projectId: number;
+
+      if (selectedProjectId === '__create__') {
+        // Create a new project with the page title
+        const [activeTab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+        });
+        const title = activeTab?.title || new URL(activeTabUrl).hostname;
+        const createRes = await fetch(`${API_URL}/api/v1/projects`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            entityId: selectedEntityId,
+            name: title,
+          }),
+        });
+        const createData = await createRes.json();
+        if (!createData.success || !createData.data?.id) {
+          setError(
+            createData.error ||
+              createData.data?.message ||
+              'Failed to create project'
+          );
+          return;
+        }
+        projectId = createData.data.id;
+        // Refresh projects list
+        setProjects(prev => [...prev, createData.data]);
+        setSelectedProjectId(String(projectId));
+      } else {
+        projectId = Number(selectedProjectId);
+      }
+
+      // Create or reuse app under the project
+      const appRes = await fetch(
+        `${API_URL}/api/v1/projects/${projectId}/apps`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            projectId,
+            name: new URL(activeTabUrl).hostname,
+            url: activeTabUrl,
+          }),
+        }
+      );
+      const appData = await appRes.json();
+      if (!appData.success || !appData.data?.id) {
+        setError(appData.error || 'Failed to create app');
+        return;
+      }
+      const appId = appData.data.id;
+
+      // Create scan under the app
+      const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers,
         body: JSON.stringify({ url: activeTabUrl }),
       });
-      const data = await response.json();
-      if (data.success && data.data?.runId) {
+      const scanData = await scanRes.json();
+      if (scanData.success && scanData.data?.runId) {
         setProgress({
           ...initialProgress,
           phase: 'mouse_scanning',
           currentPageUrl: activeTabUrl,
         });
         setIsScanning(true);
-        // Tell background worker to start scanning the current tab
         chrome.runtime.sendMessage({
           type: 'START_SCAN',
           url: activeTabUrl,
-          runId: data.data.runId,
+          runId: scanData.data.runId,
+          appId,
         });
         setError(null);
       } else {
-        setError(data.data?.message || data.error || 'Failed to submit scan');
+        setError(
+          scanData.data?.message || scanData.error || 'Failed to submit scan'
+        );
       }
     } catch {
       setError('Failed to connect to API');
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeTabUrl, token]);
+  }, [activeTabUrl, token, selectedEntityId, selectedProjectId]);
 
   // Auto-scroll event log to bottom
   useEffect(() => {
@@ -216,11 +338,61 @@ export function SidePanel() {
         </div>
       </div>
 
+      {/* Workspace & Project selectors */}
+      {!isScanning && (
+        <div className='space-y-2'>
+          <div>
+            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+              Workspace
+            </label>
+            <select
+              value={selectedEntityId || ''}
+              onChange={e => {
+                setSelectedEntityId(e.target.value);
+                setSelectedProjectId('');
+              }}
+              disabled={loadingEntities || entities.length === 0}
+              className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
+            >
+              {loadingEntities && <option>Loading...</option>}
+              {!loadingEntities && entities.length === 0 && (
+                <option>No workspaces</option>
+              )}
+              {entities.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.displayName || e.entitySlug}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+              Project
+            </label>
+            <select
+              value={selectedProjectId}
+              onChange={e => setSelectedProjectId(e.target.value)}
+              disabled={loadingProjects || !selectedEntityId}
+              className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
+            >
+              <option value=''>Select project...</option>
+              {projects.map(p => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.name}
+                </option>
+              ))}
+              <option value='__create__'>+ Create Project</option>
+            </select>
+          </div>
+        </div>
+      )}
+
       {/* Test Current Page Button */}
       {activeTabUrl && !isScanning && (
         <button
           onClick={handleTestCurrentPage}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !selectedProjectId || !selectedEntityId}
           className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
         >
           {isSubmitting
