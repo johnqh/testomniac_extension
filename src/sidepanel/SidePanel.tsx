@@ -6,6 +6,7 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { LoginPage } from '@sudobility/building_blocks';
+import { Combobox } from '@sudobility/components';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
 import { chromeGoogleSignIn } from './auth/googleSignIn';
 
@@ -104,6 +105,12 @@ export function SidePanel() {
       .then(data => {
         if (data.success && Array.isArray(data.data)) {
           setProjects(data.data);
+          // Auto-select "Create Project" if no existing projects
+          if (data.data.length === 0) {
+            setSelectedProjectId('__create__');
+          } else {
+            setSelectedProjectId('');
+          }
         }
       })
       .catch(() => {})
@@ -123,7 +130,6 @@ export function SidePanel() {
     }
     getActiveTab();
 
-    // Update when tab changes
     const listener = () => {
       getActiveTab();
     };
@@ -159,7 +165,6 @@ export function SidePanel() {
       let projectId: number;
 
       if (selectedProjectId === '__create__') {
-        // Create a new project with the page title
         const [activeTab] = await chrome.tabs.query({
           active: true,
           currentWindow: true,
@@ -183,7 +188,6 @@ export function SidePanel() {
           return;
         }
         projectId = createData.data.id;
-        // Refresh projects list
         setProjects(prev => [...prev, createData.data]);
         setSelectedProjectId(String(projectId));
       } else {
@@ -191,6 +195,12 @@ export function SidePanel() {
       }
 
       // Create or reuse app under the project
+      console.log(
+        '[SidePanel] Creating app under project',
+        projectId,
+        'selectedProjectId:',
+        selectedProjectId
+      );
       const appRes = await fetch(
         `${API_URL}/api/v1/projects/${projectId}/apps`,
         {
@@ -210,7 +220,7 @@ export function SidePanel() {
       }
       const appId = appData.data.id;
 
-      // Create scan under the app
+      // Create scan
       const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
         method: 'POST',
         headers,
@@ -243,7 +253,7 @@ export function SidePanel() {
     }
   }, [activeTabUrl, token, selectedEntityId, selectedProjectId]);
 
-  // Auto-scroll event log to bottom
+  // Auto-scroll event log
   useEffect(() => {
     if (eventLogRef.current) {
       eventLogRef.current.scrollTop = eventLogRef.current.scrollHeight;
@@ -318,6 +328,17 @@ export function SidePanel() {
     );
   }
 
+  // Build combobox options
+  const entityOptions = entities.map(e => ({
+    value: e.id,
+    label: e.displayName || e.entitySlug,
+  }));
+
+  const projectOptions = [
+    ...projects.map(p => ({ value: String(p.id), label: p.name })),
+    { value: '__create__', label: '+ Create Project' },
+  ];
+
   return (
     <div className='p-3 space-y-3 text-sm'>
       {/* Header */}
@@ -329,12 +350,14 @@ export function SidePanel() {
           <span className='text-xs text-gray-500 truncate max-w-[140px]'>
             {user?.email}
           </span>
-          <button
-            onClick={() => signOut()}
-            className='text-xs text-gray-400 hover:text-gray-600'
-          >
-            Sign out
-          </button>
+          {!isScanning && (
+            <button
+              onClick={() => signOut()}
+              className='text-xs text-red-500 hover:text-red-700 font-medium'
+            >
+              Log out
+            </button>
+          )}
         </div>
       </div>
 
@@ -345,45 +368,33 @@ export function SidePanel() {
             <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
               Workspace
             </label>
-            <select
+            <Combobox
+              options={entityOptions}
               value={selectedEntityId || ''}
-              onChange={e => {
-                setSelectedEntityId(e.target.value);
+              onChange={value => {
+                setSelectedEntityId(value);
                 setSelectedProjectId('');
               }}
-              disabled={loadingEntities || entities.length === 0}
-              className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
-            >
-              {loadingEntities && <option>Loading...</option>}
-              {!loadingEntities && entities.length === 0 && (
-                <option>No workspaces</option>
-              )}
-              {entities.map(e => (
-                <option key={e.id} value={e.id}>
-                  {e.displayName || e.entitySlug}
-                </option>
-              ))}
-            </select>
+              placeholder={loadingEntities ? 'Loading...' : 'Select workspace'}
+              disabled={loadingEntities}
+              emptyMessage='No workspaces found'
+              className='w-full'
+            />
           </div>
 
           <div>
             <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
               Project
             </label>
-            <select
+            <Combobox
+              options={projectOptions}
               value={selectedProjectId}
-              onChange={e => setSelectedProjectId(e.target.value)}
-              disabled={loadingProjects || !selectedEntityId}
-              className='w-full px-2 py-1.5 text-sm border border-gray-300 rounded-md bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500'
-            >
-              <option value=''>Select project...</option>
-              {projects.map(p => (
-                <option key={p.id} value={String(p.id)}>
-                  {p.name}
-                </option>
-              ))}
-              <option value='__create__'>+ Create Project</option>
-            </select>
+              onChange={value => setSelectedProjectId(value)}
+              placeholder={loadingProjects ? 'Loading...' : 'Select project...'}
+              disabled={loadingProjects}
+              emptyMessage='No projects — select "Create Project"'
+              className='w-full'
+            />
           </div>
         </div>
       )}
@@ -454,7 +465,7 @@ export function SidePanel() {
         </div>
       )}
 
-      {/* Counters — clickable to switch tabs */}
+      {/* Counters */}
       {(isScanning || progress.isComplete) && (
         <div className='grid grid-cols-4 gap-1'>
           {(
@@ -537,7 +548,6 @@ export function SidePanel() {
       {/* Tab content */}
       {(isScanning || progress.isComplete) && (
         <div className='rounded-md border border-gray-200 overflow-hidden'>
-          {/* Overview tab */}
           {resultTab === 'overview' && (
             <>
               {progress.currentPageUrl && (
@@ -565,7 +575,6 @@ export function SidePanel() {
             </>
           )}
 
-          {/* Pages tab */}
           {resultTab === 'pages' && (
             <div
               ref={eventLogRef}
@@ -607,7 +616,6 @@ export function SidePanel() {
             </div>
           )}
 
-          {/* Issues tab */}
           {resultTab === 'issues' && (
             <div
               ref={eventLogRef}
@@ -635,7 +643,6 @@ export function SidePanel() {
             </div>
           )}
 
-          {/* Actions tab */}
           {resultTab === 'actions' && (
             <div
               ref={eventLogRef}
@@ -647,7 +654,8 @@ export function SidePanel() {
                     'click',
                     'fill',
                     'select',
-                    'toggle',
+                    'radio_select',
+                    'hover',
                     'mouseover',
                     'modal',
                     'cross_origin',
@@ -667,7 +675,7 @@ export function SidePanel() {
                   </div>
                 ))}
               {progress.events.filter(e =>
-                ['click', 'fill', 'select', 'toggle', 'mouseover'].includes(
+                ['click', 'fill', 'select', 'hover', 'mouseover'].includes(
                   e.type
                 )
               ).length === 0 && (
@@ -678,7 +686,6 @@ export function SidePanel() {
             </div>
           )}
 
-          {/* All events tab */}
           {resultTab === 'events' && (
             <div
               ref={eventLogRef}
@@ -701,7 +708,6 @@ export function SidePanel() {
         </div>
       )}
 
-      {/* Complete */}
       {progress.isComplete && (
         <div className='p-2 rounded-md bg-green-50 text-green-700 text-xs font-medium'>
           Scan complete!

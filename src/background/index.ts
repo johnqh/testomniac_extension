@@ -96,7 +96,12 @@ async function loadConfig() {
 // Scan Orchestration — delegates to shared runScan()
 // ============================================================================
 
+let scanAbortController: AbortController | null = null;
+
 async function startScan(url: string, runId: number) {
+  // Cancel any previous scan
+  scanAbortController?.abort();
+  scanAbortController = new AbortController();
   LOG(`========== STARTING SCAN ==========`);
   LOG(`URL: ${url}, Run ID: ${runId}`);
   await loadConfig();
@@ -236,6 +241,7 @@ async function startScan(url: string, runId: number) {
         baseUrl: url,
         phases: ['mouse_scanning'],
         sizeClass: 'desktop',
+        signal: scanAbortController?.signal,
       },
       api,
       eventHandler
@@ -267,7 +273,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     startScan(message.url, message.runId);
     sendResponse({ ok: true });
   } else if (message.type === 'STOP_SCAN') {
-    LOG('STOP_SCAN');
+    LOG('STOP_SCAN — aborting scan');
+    scanAbortController?.abort();
     scanState.isRunning = false;
     scanState.isComplete = true;
     scanState.phase = 'stopped';
