@@ -2,7 +2,7 @@
  * Background Service Worker
  *
  * Thin wrapper that creates a ChromeAdapter and calls the shared
- * runScan() orchestrator from testomniac_scanning_service.
+ * runScan() orchestrator from testomniac_runner_service.
  * Sends progress updates to the side panel via chrome.runtime.sendMessage.
  */
 
@@ -11,7 +11,7 @@ import {
   ApiClient,
   runScan,
   type ScanEventHandler,
-} from '@sudobility/testomniac_scanning_service';
+} from '@sudobility/testomniac_runner_service';
 
 const LOG = (...args: unknown[]) => console.log('[Testomniac]', ...args);
 const ERR = (...args: unknown[]) => console.error('[Testomniac]', ...args);

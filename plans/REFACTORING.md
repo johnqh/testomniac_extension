@@ -1,12 +1,12 @@
-# Refactoring Plan: Consolidate Business Logic into testomniac_scanning_service
+# Refactoring Plan: Consolidate Business Logic into testomniac_runner_service
 
 ## Context
 
-The testomniac_extension and testomniac_scanner both implement overlapping business logic independently: element extraction, bug detection, scan orchestration, action classification, form value planning, and direct API calls. This creates maintenance burden — changes to scanning logic must be made in two places.
+The testomniac_extension and testomniac_runner both implement overlapping business logic independently: element extraction, bug detection, scan orchestration, action classification, form value planning, and direct API calls. This creates maintenance burden — changes to scanning logic must be made in two places.
 
-This refactoring consolidates all shared business logic into `testomniac_scanning_service`, making both consumers thin wrappers that provide a `BrowserAdapter` implementation and handle platform-specific concerns (Chrome APIs vs Puppeteer).
+This refactoring consolidates all shared business logic into `testomniac_runner_service`, making both consumers thin wrappers that provide a `BrowserAdapter` implementation and handle platform-specific concerns (Chrome APIs vs Puppeteer).
 
-**Dependency chain**: `testomniac_types` → `testomniac_scanning_service` → `testomniac_scanner` + `testomniac_extension`
+**Dependency chain**: `testomniac_types` → `testomniac_runner_service` → `testomniac_runner` + `testomniac_extension`
 
 **Build/deploy**: After modifying scanning_service, run `testomniac_app/scripts/push_all.sh` to build, publish, and update all consumers. Fix any errors if the script fails.
 
@@ -108,7 +108,7 @@ src/
 
 ## 2. BrowserAdapter Interface Changes
 
-File: `testomniac_scanning_service/src/adapter.ts`
+File: `testomniac_runner_service/src/adapter.ts`
 
 Add 2 new methods to the existing 15-method interface:
 
@@ -339,7 +339,7 @@ Remove the `node:crypto` shim alias since scanning_service now handles hashing u
 
 ### `package.json` — UPDATE
 
-Update `@sudobility/testomniac_scanning_service` to `^0.1.0`.
+Update `@sudobility/testomniac_runner_service` to `^0.1.0`.
 
 ---
 
@@ -375,7 +375,7 @@ Update `@sudobility/testomniac_scanning_service` to `^0.1.0`.
 
 Replace manual phase chaining with shared orchestrator:
 ```typescript
-import { runScan, getApiClient, type ScanEventHandler } from '@sudobility/testomniac_scanning_service';
+import { runScan, getApiClient, type ScanEventHandler } from '@sudobility/testomniac_runner_service';
 
 export async function runFullScan(options: RunOptions): Promise<void> {
   const config = loadConfig();
@@ -406,7 +406,7 @@ export async function runFullScan(options: RunOptions): Promise<void> {
 
 Change `getApiClient` import from local to scanning_service:
 ```typescript
-import { getApiClient } from '@sudobility/testomniac_scanning_service';
+import { getApiClient } from '@sudobility/testomniac_runner_service';
 ```
 
 ### `src/adapters/PuppeteerAdapter.ts` — ADD 2 methods
@@ -487,14 +487,14 @@ Plugin interface/registry moves to scanning_service. Concrete plugin implementat
 
 ### scanning_service
 ```bash
-cd /Users/johnhuang/projects/testomniac_scanning_service
+cd /Users/johnhuang/projects/testomniac_runner_service
 bun run verify   # typecheck + lint + test + build
 ```
 Check: no circular deps, all exports resolve, computeHashes async works, new tests pass.
 
 ### scanner
 ```bash
-cd /Users/johnhuang/projects/testomniac_scanner
+cd /Users/johnhuang/projects/testomniac_runner
 bun run verify
 ```
 Check: all imports from scanning_service, PuppeteerAdapter satisfies extended BrowserAdapter, existing runner/auth/plugin tests pass.

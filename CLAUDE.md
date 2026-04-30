@@ -1,6 +1,6 @@
 # Testomniac Extension
 
-AI-powered automated UI testing Chrome extension (Manifest V3). Thin wrapper that creates a `ChromeAdapter` and calls `runScan()` from `@sudobility/testomniac_scanning_service`.
+AI-powered automated UI testing Chrome extension (Manifest V3). Thin wrapper that creates a `ChromeAdapter` and calls `runScan()` from `@sudobility/testomniac_runner_service`.
 
 **Package**: `testomniac_extension` v0.1.12 (private, not published)
 
@@ -45,7 +45,7 @@ src/
 
 ### Deleted (moved to scanning_service)
 
-The following directories were removed during refactoring. All this logic now lives in `@sudobility/testomniac_scanning_service`:
+The following directories were removed during refactoring. All this logic now lives in `@sudobility/testomniac_runner_service`:
 
 - `background/extractors/` (11 files: index, types, helpers, domSnapshot, selectors, textInputs, selects, toggles, productActions, buttons, clickables)
 - `background/planners/` (fillValuePlanner.ts)
@@ -98,7 +98,7 @@ The extension only runs the `mouse_scanning` phase. AI analysis, input scanning,
 
 ## ChromeAdapter
 
-Implements `BrowserAdapter` interface from `@sudobility/testomniac_scanning_service`. All interactions use **real CDP mouse events** via `chrome.debugger`, not DOM APIs:
+Implements `BrowserAdapter` interface from `@sudobility/testomniac_runner_service`. All interactions use **real CDP mouse events** via `chrome.debugger`, not DOM APIs:
 
 - `click()` — scrolls into view, resolves clickable point (checks occlusion), dispatches CDP `Input.dispatchMouseEvent`
 - `hover()` — CDP mouseMoved only (no click)
@@ -131,7 +131,7 @@ React 18 + Tailwind CSS interface with 5 tabs:
 
 ## API Integration
 
-Uses `ApiClient` from `@sudobility/testomniac_scanning_service` for all scanner endpoints.
+Uses `ApiClient` from `@sudobility/testomniac_runner_service` for all scanner endpoints.
 
 **Base URL**: loaded from `chrome.storage.local` (default: `http://localhost:8027`)
 
@@ -173,9 +173,9 @@ The build resolves these aliases to browser-compatible stubs:
 
 ## Related Projects (Testomniac Ecosystem)
 
-- **testomniac_scanning_service** (`@sudobility/testomniac_scanning_service`) — Shared library containing ALL scanning logic. This extension calls `runScan()` from it and imports `ApiClient` and `ScanEventHandler`.
+- **testomniac_runner_service** (`@sudobility/testomniac_runner_service`) — Shared library containing ALL scanning logic. This extension calls `runScan()` from it and imports `ApiClient` and `ScanEventHandler`.
 - **testomniac_api** (`localhost:8027`) — REST API backend; this extension calls it via the shared ApiClient
-- **testomniac_scanner** — Server-side Puppeteer worker; calls the same `runScan()` with all 5 phases. Uses `PuppeteerAdapter` instead of `ChromeAdapter`.
+- **testomniac_runner** — Server-side Puppeteer worker; calls the same `runScan()` with all 5 phases. Uses `PuppeteerAdapter` instead of `ChromeAdapter`.
 - **testomniac_types** (`@sudobility/testomniac_types`) — Shared TypeScript type definitions
 - **testomniac_app** — Web frontend that displays scan results
 
@@ -197,7 +197,7 @@ The build resolves these aliases to browser-compatible stubs:
 - **crypto.ts shim is still required**: Even though extractors and planners were moved to scanning_service, the `node:crypto` shim is needed because scanning_service's `component-detector.ts` imports `node:crypto` at the module level. Vite resolves it to the browser shim.
 - **Firebase auth is optional**: The extension works without authentication for local development. Firebase config comes from environment variables at build time.
 - **Max 100 events in background state**: The event log is capped at 100 entries. The side panel displays the last 50.
-- **No extractors/ or planners/ directories**: These were deleted. If you see imports referencing `./extractors/` or `./planners/`, they should be updated to import from `@sudobility/testomniac_scanning_service`.
+- **No extractors/ or planners/ directories**: These were deleted. If you see imports referencing `./extractors/` or `./planners/`, they should be updated to import from `@sudobility/testomniac_runner_service`.
 
 ## Testing Notes
 

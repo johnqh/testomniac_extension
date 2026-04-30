@@ -264,7 +264,7 @@ components, component_instances
 - Add unique constraint on pages(app_id, url)
 - Update ALL route files: scanner.ts, runs-read.ts → scans-read.ts, projects.ts, etc.
 
-### Phase 3: Scanning Service (`testomniac_scanning_service`)
+### Phase 3: Scanning Service (`testomniac_runner_service`)
 - Update `ApiClient` methods: rename run→scan, add action definition methods, update action execution flow
 - Update orchestrator: create action definitions when discovering items, create executions when performing actions
 - Update mouse-scanning: work with new action model
@@ -275,7 +275,7 @@ components, component_instances
 - Update query keys
 - Update TestomniacClient methods
 
-### Phase 5: Frontend + Consumers (`testomniac_app`, `testomniac_scanner`, `testomniac_extension`)
+### Phase 5: Frontend + Consumers (`testomniac_app`, `testomniac_runner`, `testomniac_extension`)
 - Update all references from run→scan
 - Update action display
 - Update extension background worker

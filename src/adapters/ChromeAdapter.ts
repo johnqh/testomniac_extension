@@ -1,4 +1,4 @@
-import type { BrowserAdapter } from '@sudobility/testomniac_scanning_service';
+import type { BrowserAdapter } from '@sudobility/testomniac_runner_service';
 
 /**
  * Chrome extension adapter implementing BrowserAdapter.

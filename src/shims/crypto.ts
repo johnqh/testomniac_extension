@@ -1,6 +1,6 @@
 /**
  * Shim for node:crypto in browser context.
- * scanning_service's component-detector.js uses createHash from node:crypto.
+ * runner_service's component-detector.js uses createHash from node:crypto.
  * This provides a browser-compatible implementation via SubtleCrypto.
  */
 

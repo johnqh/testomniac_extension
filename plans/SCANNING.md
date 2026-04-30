@@ -2,12 +2,12 @@
 
 ## Overview
 
-The Testomniac Chrome extension runs the same scanning logic as the server-side scanner, but uses Chrome APIs instead of Puppeteer. A shared library (`@sudobility/testomniac_scanning_service`) provides the scanning logic with a `BrowserAdapter` abstraction.
+The Testomniac Chrome extension runs the same scanning logic as the server-side scanner, but uses Chrome APIs instead of Puppeteer. A shared library (`@sudobility/testomniac_runner_service`) provides the scanning logic with a `BrowserAdapter` abstraction.
 
 ## Architecture
 
 ```
-@sudobility/testomniac_scanning_service (shared library)
+@sudobility/testomniac_runner_service (shared library)
   ├── BrowserAdapter interface
   ├── Scanning logic (mouse-scanner, extractor, issue-detector, etc.)
   ├── API client (talks to testomniac_api)
@@ -120,8 +120,8 @@ Use `zustand` store in the side panel (same pattern as `scanProgressStore`):
 The background script orchestrates scanning:
 
 ```ts
-import { ApiClient } from "@sudobility/testomniac_scanning_service";
-import { runMouseScanner } from "@sudobility/testomniac_scanning_service";
+import { ApiClient } from "@sudobility/testomniac_runner_service";
+import { runMouseScanner } from "@sudobility/testomniac_runner_service";
 import { ChromeAdapter } from "../adapters/ChromeAdapter";
 
 async function startScan(url: string) {
@@ -158,7 +158,7 @@ async function startScan(url: string) {
 - Basic UI: URL input, start button, status display
 
 ### Step 3: Background Integration
-- Import scanning functions from `@sudobility/testomniac_scanning_service`
+- Import scanning functions from `@sudobility/testomniac_runner_service`
 - Wire up `ChromeAdapter` + API client
 - Send progress messages to side panel
 
@@ -176,7 +176,7 @@ async function startScan(url: string) {
 
 ```json
 {
-  "@sudobility/testomniac_scanning_service": "^0.0.1",
+  "@sudobility/testomniac_runner_service": "^0.0.1",
   "@sudobility/testomniac_types": "^0.0.21",
   "@sudobility/design": "^1.1.29"
 }
