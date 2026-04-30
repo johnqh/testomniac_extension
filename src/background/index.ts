@@ -26,13 +26,13 @@ let apiKey = DEFAULT_API_KEY;
 
 interface ScanState {
   isRunning: boolean;
-  runId: number | null;
+  scanId: number | null;
   appId: number | null;
   phase: string;
   pagesFound: number;
   pageStatesFound: number;
-  actionsCompleted: number;
-  issuesFound: number;
+  testRunsCompleted: number;
+  findingsFound: number;
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
   events: Array<{ type: string; message: string; timestamp: number }>;
@@ -41,13 +41,13 @@ interface ScanState {
 
 let scanState: ScanState = {
   isRunning: false,
-  runId: null,
+  scanId: null,
   appId: null,
   phase: 'idle',
   pagesFound: 0,
   pageStatesFound: 0,
-  actionsCompleted: 0,
-  issuesFound: 0,
+  testRunsCompleted: 0,
+  findingsFound: 0,
   currentPageUrl: null,
   latestScreenshotDataUrl: null,
   events: [],
@@ -57,13 +57,13 @@ let scanState: ScanState = {
 function resetState() {
   scanState = {
     isRunning: false,
-    runId: null,
+    scanId: null,
     appId: null,
     phase: 'idle',
     pagesFound: 0,
     pageStatesFound: 0,
-    actionsCompleted: 0,
-    issuesFound: 0,
+    testRunsCompleted: 0,
+    findingsFound: 0,
     currentPageUrl: null,
     latestScreenshotDataUrl: null,
     events: [],
@@ -108,8 +108,8 @@ async function startScan(url: string, runId: number) {
 
   resetState();
   scanState.isRunning = true;
-  scanState.phase = 'mouse_scanning';
-  scanState.runId = runId;
+  scanState.phase = 'scanning';
+  scanState.scanId = runId;
   addEvent('scan_started', `Scanning ${url}`);
 
   LOG(`Creating ApiClient with baseUrl=${apiUrl}, hasApiKey=${!!apiKey}`);
@@ -172,9 +172,9 @@ async function startScan(url: string, runId: number) {
     // Build ScanEventHandler that bridges to side panel
     const eventHandler: ScanEventHandler = {
       onPageFound(page) {
-        LOG(`[event] pageFound: ${page.url} (id=${page.pageId})`);
-        scanState.currentPageUrl = page.url;
-        addEvent('page_discovered', page.url);
+        LOG(`[event] pageFound: ${page.relativePath} (id=${page.pageId})`);
+        scanState.currentPageUrl = page.relativePath;
+        addEvent('page_discovered', page.relativePath);
       },
       onPageStateCreated(state) {
         LOG(
@@ -182,27 +182,43 @@ async function startScan(url: string, runId: number) {
         );
         addEvent('state_captured', 'Page state captured');
       },
-      onActionCompleted(action) {
-        LOG(`[event] actionCompleted: ${action.type} ${action.selector || ''}`);
-        addEvent(action.type, action.selector || action.pageUrl);
+      onDecompositionJobCreated(job) {
+        LOG(
+          `[event] decompositionJobCreated: jobId=${job.jobId} pageStateId=${job.pageStateId}`
+        );
+        addEvent('decomposition_started', `Job ${job.jobId} started`);
       },
-      onIssueDetected(issue) {
-        LOG(`[event] issueDetected: ${issue.type}: ${issue.description}`);
-        addEvent('bug', `${issue.type}: ${issue.description}`);
+      onDecompositionJobCompleted(job) {
+        LOG(`[event] decompositionJobCompleted: jobId=${job.jobId}`);
+        addEvent('decomposition_completed', `Job ${job.jobId} completed`);
       },
-      onPhaseChanged(phase) {
-        LOG(`[event] phaseChanged: ${phase}`);
-        scanState.phase = phase;
-        addEvent('phase', `Phase: ${phase}`);
+      onTestSuiteCreated(suite) {
+        LOG(
+          `[event] testSuiteCreated: suiteId=${suite.suiteId} title=${suite.title}`
+        );
+        addEvent('test_suite_created', suite.title);
+      },
+      onTestRunCompleted(run) {
+        LOG(
+          `[event] testRunCompleted: testRunId=${run.testRunId} passed=${run.passed}`
+        );
+        addEvent(
+          run.passed ? 'test_passed' : 'test_failed',
+          `Test run ${run.testRunId}`
+        );
+      },
+      onFindingCreated(finding) {
+        LOG(`[event] findingCreated: ${finding.type}: ${finding.title}`);
+        addEvent('finding', `${finding.type}: ${finding.title}`);
       },
       onStatsUpdated(stats) {
         LOG(
-          `[event] statsUpdated: pages=${stats.pagesFound} states=${stats.pageStatesFound} actions=${stats.actionsCompleted} issues=${stats.issuesFound}`
+          `[event] statsUpdated: pages=${stats.pagesFound} states=${stats.pageStatesFound} testRuns=${stats.testRunsCompleted} findings=${stats.findingsFound}`
         );
         scanState.pagesFound = stats.pagesFound;
         scanState.pageStatesFound = stats.pageStatesFound;
-        scanState.actionsCompleted = stats.actionsCompleted;
-        scanState.issuesFound = stats.issuesFound;
+        scanState.testRunsCompleted = stats.testRunsCompleted;
+        scanState.findingsFound = stats.findingsFound;
         sendProgressToSidePanel();
       },
       onScreenshotCaptured(data) {
@@ -213,17 +229,17 @@ async function startScan(url: string, runId: number) {
       },
       onScanComplete(summary) {
         LOG(
-          `[event] scanComplete: pages=${summary.totalPages} issues=${summary.totalIssues} duration=${summary.durationMs}ms`
+          `[event] scanComplete: pages=${summary.totalPages} findings=${summary.totalFindings} duration=${summary.durationMs}ms`
         );
         scanState.isComplete = true;
         scanState.phase = 'completed';
         addEvent(
           'run_completed',
-          `Completed: ${summary.totalPages} pages, ${summary.totalIssues} issues`
+          `Completed: ${summary.totalPages} pages, ${summary.totalFindings} findings`
         );
       },
       onError(error) {
-        ERR(`[event] scanError: ${error.message} (phase=${error.phase})`);
+        ERR(`[event] scanError: ${error.message}`);
         scanState.phase = 'failed';
         addEvent('error', error.message);
       },
@@ -231,15 +247,15 @@ async function startScan(url: string, runId: number) {
 
     // Call the shared orchestrator
     LOG(
-      `Calling runScan(adapter, {runId=${runId}, appId=${appId}, baseUrl=${url}, phases=["mouse_scanning"]}, api, eventHandler)`
+      `Calling runScan(adapter, {scanId=${runId}, appId=${appId}, scanUrl=${url}, baseUrl=${new URL(url).origin}}, api, eventHandler)`
     );
     const result = await runScan(
       adapter,
       {
-        runId,
+        scanId: runId,
         appId,
-        baseUrl: url,
-        phases: ['mouse_scanning'],
+        scanUrl: url,
+        baseUrl: new URL(url).origin,
         sizeClass: 'desktop',
         signal: scanAbortController?.signal,
       },

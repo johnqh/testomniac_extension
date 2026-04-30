@@ -28,8 +28,8 @@ interface ScanProgress {
   phase: string;
   pagesFound: number;
   pageStatesFound: number;
-  actionsCompleted: number;
-  issuesFound: number;
+  testRunsCompleted: number;
+  findingsFound: number;
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
   isComplete: boolean;
@@ -40,8 +40,8 @@ const initialProgress: ScanProgress = {
   phase: 'idle',
   pagesFound: 0,
   pageStatesFound: 0,
-  actionsCompleted: 0,
-  issuesFound: 0,
+  testRunsCompleted: 0,
+  findingsFound: 0,
   currentPageUrl: null,
   latestScreenshotDataUrl: null,
   isComplete: false,
@@ -230,7 +230,7 @@ export function SidePanel() {
       if (scanData.success && scanData.data?.runId) {
         setProgress({
           ...initialProgress,
-          phase: 'mouse_scanning',
+          phase: 'scanning',
           currentPageUrl: activeTabUrl,
         });
         setIsScanning(true);
@@ -286,11 +286,10 @@ export function SidePanel() {
   }, []);
 
   const phases = [
-    { key: 'mouse_scanning', label: 'Scanning' },
-    { key: 'ai_analysis', label: 'AI Analysis' },
-    { key: 'input_scanning', label: 'Input Testing' },
-    { key: 'test_generation', label: 'Generating' },
-    { key: 'test_execution', label: 'Executing' },
+    { key: 'scanning', label: 'Scanning' },
+    { key: 'decomposing', label: 'Analyzing' },
+    { key: 'testing', label: 'Testing' },
+    { key: 'completed', label: 'Complete' },
   ];
 
   const currentPhaseIndex = phases.findIndex(p => p.key === progress.phase);
@@ -486,15 +485,15 @@ export function SidePanel() {
               },
               {
                 key: 'actions',
-                label: 'Actions',
-                value: progress.actionsCompleted,
+                label: 'Tests',
+                value: progress.testRunsCompleted,
                 color: 'text-green-600',
                 ring: 'ring-green-300',
               },
               {
                 key: 'issues',
-                label: 'Issues',
-                value: progress.issuesFound,
+                label: 'Findings',
+                value: progress.findingsFound,
                 color: 'text-red-600',
                 ring: 'ring-red-300',
               },
@@ -525,8 +524,8 @@ export function SidePanel() {
             [
               { key: 'overview', label: 'Overview' },
               { key: 'pages', label: 'Pages' },
-              { key: 'issues', label: 'Issues' },
-              { key: 'actions', label: 'Actions' },
+              { key: 'issues', label: 'Findings' },
+              { key: 'actions', label: 'Tests' },
               { key: 'events', label: 'All Events' },
             ] as const
           ).map(tab => (
@@ -622,7 +621,7 @@ export function SidePanel() {
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
               {progress.events
-                .filter(e => e.type === 'bug')
+                .filter(e => e.type === 'finding')
                 .map((event, i) => (
                   <div
                     key={i}
@@ -631,13 +630,14 @@ export function SidePanel() {
                     <span className='text-gray-400'>
                       {new Date(event.timestamp).toLocaleTimeString()}
                     </span>{' '}
-                    <span className='text-red-600'>bug</span>{' '}
+                    <span className='text-red-600'>finding</span>{' '}
                     <span className='text-gray-700'>{event.message}</span>
                   </div>
                 ))}
-              {progress.events.filter(e => e.type === 'bug').length === 0 && (
+              {progress.events.filter(e => e.type === 'finding').length ===
+                0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No issues found
+                  No findings yet
                 </div>
               )}
             </div>
@@ -651,15 +651,11 @@ export function SidePanel() {
               {progress.events
                 .filter(e =>
                   [
-                    'click',
-                    'fill',
-                    'select',
-                    'radio_select',
-                    'hover',
-                    'mouseover',
-                    'modal',
-                    'cross_origin',
-                    'new_tab_closed',
+                    'test_passed',
+                    'test_failed',
+                    'test_suite_created',
+                    'decomposition_started',
+                    'decomposition_completed',
                   ].includes(e.type)
                 )
                 .map((event, i) => (
@@ -670,17 +666,25 @@ export function SidePanel() {
                     <span className='text-gray-400'>
                       {new Date(event.timestamp).toLocaleTimeString()}
                     </span>{' '}
-                    <span className='text-green-600'>{event.type}</span>{' '}
+                    <span
+                      className={
+                        event.type === 'test_failed'
+                          ? 'text-red-600'
+                          : 'text-green-600'
+                      }
+                    >
+                      {event.type}
+                    </span>{' '}
                     <span className='text-gray-600'>{event.message}</span>
                   </div>
                 ))}
               {progress.events.filter(e =>
-                ['click', 'fill', 'select', 'hover', 'mouseover'].includes(
+                ['test_passed', 'test_failed', 'test_suite_created'].includes(
                   e.type
                 )
               ).length === 0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No actions yet
+                  No test runs yet
                 </div>
               )}
             </div>
