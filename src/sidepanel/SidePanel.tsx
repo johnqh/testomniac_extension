@@ -224,7 +224,11 @@ export function SidePanel() {
       const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ url: activeTabUrl }),
+        body: JSON.stringify({
+          url: activeTabUrl,
+          createdByUserId: user?.uid,
+          ownedByUserId: user?.uid,
+        }),
       });
       const scanData = await scanRes.json();
       if (scanData.success && scanData.data?.runId) {
@@ -251,7 +255,7 @@ export function SidePanel() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeTabUrl, token, selectedEntityId, selectedProjectId]);
+  }, [activeTabUrl, token, selectedEntityId, selectedProjectId, user?.uid]);
 
   // Auto-scroll event log
   useEffect(() => {
