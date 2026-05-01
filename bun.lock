@@ -14,8 +14,8 @@
         "@sudobility/di": "^1.5.53",
         "@sudobility/di_web": "^0.1.175",
         "@sudobility/testomniac_client": "^0.0.42",
-        "@sudobility/testomniac_lib": "^0.0.41",
-        "@sudobility/testomniac_scanning_service": "^0.1.24",
+        "@sudobility/testomniac_lib": "^0.0.42",
+        "@sudobility/testomniac_runner_service": "^0.1.24",
         "@sudobility/testomniac_types": "^0.0.35",
         "@sudobility/types": "^1.9.61",
         "@tanstack/react-query": "^5.90.5",
@@ -458,9 +458,9 @@
 
     "@sudobility/testomniac_client": ["@sudobility/testomniac_client@0.0.42", "", { "peerDependencies": { "@sudobility/types": "^1.9.61", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0" } }, "sha512-IzpED604Yi/smh6RwUmTjF1hqDh0mt2EvdxDyQpu4nbtANTAdvIcaVxieMiGuHgykKg9xfYDLjAawEHKoSmrHA=="],
 
-    "@sudobility/testomniac_lib": ["@sudobility/testomniac_lib@0.0.41", "", { "peerDependencies": { "@sudobility/types": "^1.9.61", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0", "zustand": ">=5.0.0" } }, "sha512-Hp0VT/8ywXLi8Qtyqi3hkaHAXoVg2+VIXJj8b0doaeBziyZVhLECOJ1HXiQxGMfXaraen662GgBGFCKJ9N2bXg=="],
+    "@sudobility/testomniac_lib": ["@sudobility/testomniac_lib@0.0.42", "", { "peerDependencies": { "@sudobility/types": "^1.9.61", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0", "zustand": ">=5.0.0" } }, "sha512-eJ62uzwYEmDd/tjuKNklY03XgsTBiBX3tQXX0wSLSv5Vypd/WsTnBb8j0WfzFv9hq31FhpvZcEi/h7XiqhxB5Q=="],
 
-    "@sudobility/testomniac_scanning_service": ["@sudobility/testomniac_scanning_service@0.1.24", "", { "peerDependencies": { "@sudobility/testomniac_types": "^0.0.35", "openai": ">=6.0.0", "react": ">=18.0.0" }, "optionalPeers": ["openai", "react"] }, "sha512-PvpnMDMdL7n5fIo9Ju28wNSzh7fokc+VhpKZmhS0cpo0EY14CiCBv+8AKXC7GocMRHapsPOHgkm0FOk6V/kjyQ=="],
+    "@sudobility/testomniac_runner_service": ["@sudobility/testomniac_runner_service@0.1.24", "", { "peerDependencies": { "@sudobility/testomniac_types": "^0.0.35", "openai": ">=6.0.0", "react": ">=18.0.0" }, "optionalPeers": ["openai", "react"] }, "sha512-lTCYdGc2XsBaJdk/FHBNkxNSCo71ohwUBa7l1BwCWIC+y/+QY1egJu66T+dJZ9yNNajw6DF+aLqauLC96kLIPg=="],
 
     "@sudobility/testomniac_types": ["@sudobility/testomniac_types@0.0.35", "", { "peerDependencies": { "@sudobility/types": "^1.9.61" } }, "sha512-Wh9CL0s//dn5z//b3XEtKXg7qgteaYnWf1bdToIvHK8g9Ny43c2nSEzfcxHX8aqPvM5k69ygTibMkEDIAdDqyg=="],
 
