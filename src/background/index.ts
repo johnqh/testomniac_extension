@@ -128,8 +128,8 @@ async function startScan(url: string, runId: number) {
   try {
     // Get app info from this specific run
     LOG(`Fetching run ${runId} from API...`);
-    const run = await api.getRun(runId);
-    LOG(`getRun result:`, run);
+    const run = await api.getTestRun(runId);
+    LOG(`getTestRun result:`, run);
     if (!run) {
       throw new Error(`Run ${runId} not found`);
     }
