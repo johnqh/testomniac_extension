@@ -18,9 +18,9 @@ interface EntityOption {
   displayName: string;
 }
 
-interface ProjectOption {
+interface ProductOption {
   id: number;
-  name: string;
+  title: string;
   entityId: string | null;
 }
 
@@ -61,13 +61,13 @@ export function SidePanel() {
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
 
-  // Entity & project selection
+  // Entity & product selection
   const [entities, setEntities] = useState<EntityOption[]>([]);
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('');
+  const [products, setProducts] = useState<ProductOption[]>([]);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [loadingEntities, setLoadingEntities] = useState(false);
-  const [loadingProjects, setLoadingProjects] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   // Fetch entities when authenticated
   useEffect(() => {
@@ -89,32 +89,32 @@ export function SidePanel() {
       .finally(() => setLoadingEntities(false));
   }, [isAuthenticated, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch projects when entity is selected
+  // Fetch products when entity is selected
   useEffect(() => {
     if (!selectedEntityId || !token) {
-      setProjects([]);
+      setProducts([]);
       return;
     }
     const entity = entities.find(e => e.id === selectedEntityId);
     if (!entity) return;
-    setLoadingProjects(true);
-    fetch(`${API_URL}/api/v1/entities/${entity.entitySlug}/projects`, {
+    setLoadingProducts(true);
+    fetch(`${API_URL}/api/v1/entities/${entity.entitySlug}/products`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.json())
       .then(data => {
         if (data.success && Array.isArray(data.data)) {
-          setProjects(data.data);
-          // Auto-select "Create Project" if no existing projects
+          setProducts(data.data);
+          // Auto-select "Create Product" if no existing products
           if (data.data.length === 0) {
-            setSelectedProjectId('__create__');
+            setSelectedProductId('__create__');
           } else {
-            setSelectedProjectId('');
+            setSelectedProductId('');
           }
         }
       })
       .catch(() => {})
-      .finally(() => setLoadingProjects(false));
+      .finally(() => setLoadingProducts(false));
   }, [selectedEntityId, token, entities]);
 
   // Get active tab URL
@@ -150,7 +150,7 @@ export function SidePanel() {
     };
   }, []);
 
-  // Submit: create/select project → create/reuse app → create scan → start
+  // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
     if (!activeTabUrl || !token || !selectedEntityId) return;
     setError(null);
@@ -162,20 +162,20 @@ export function SidePanel() {
         Authorization: `Bearer ${token}`,
       };
 
-      let projectId: number;
+      let productId: number;
 
-      if (selectedProjectId === '__create__') {
+      if (selectedProductId === '__create__') {
         const [activeTab] = await chrome.tabs.query({
           active: true,
           currentWindow: true,
         });
         const title = activeTab?.title || new URL(activeTabUrl).hostname;
-        const createRes = await fetch(`${API_URL}/api/v1/projects`, {
+        const createRes = await fetch(`${API_URL}/api/v1/products`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
             entityId: selectedEntityId,
-            name: title,
+            title,
           }),
         });
         const createData = await createRes.json();
@@ -183,42 +183,42 @@ export function SidePanel() {
           setError(
             createData.error ||
               createData.data?.message ||
-              'Failed to create project'
+              'Failed to create product'
           );
           return;
         }
-        projectId = createData.data.id;
-        setProjects(prev => [...prev, createData.data]);
-        setSelectedProjectId(String(projectId));
+        productId = createData.data.id;
+        setProducts(prev => [...prev, createData.data]);
+        setSelectedProductId(String(productId));
       } else {
-        projectId = Number(selectedProjectId);
+        productId = Number(selectedProductId);
       }
 
-      // Create or reuse app under the project
+      // Create or reuse runner under the product
       console.log(
-        '[SidePanel] Creating app under project',
-        projectId,
-        'selectedProjectId:',
-        selectedProjectId
+        '[SidePanel] Creating runner under product',
+        productId,
+        'selectedProductId:',
+        selectedProductId
       );
-      const appRes = await fetch(
-        `${API_URL}/api/v1/projects/${projectId}/apps`,
+      const runnerRes = await fetch(
+        `${API_URL}/api/v1/products/${productId}/runners`,
         {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            projectId,
-            name: new URL(activeTabUrl).hostname,
-            url: activeTabUrl,
+            productId,
+            title: new URL(activeTabUrl).hostname,
+            type: 'extension',
           }),
         }
       );
-      const appData = await appRes.json();
-      if (!appData.success || !appData.data?.id) {
-        setError(appData.error || 'Failed to create app');
+      const runnerData = await runnerRes.json();
+      if (!runnerData.success || !runnerData.data?.id) {
+        setError(runnerData.error || 'Failed to create runner');
         return;
       }
-      const appId = appData.data.id;
+      const runnerId = runnerData.data.id;
 
       // Create scan
       const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
@@ -242,7 +242,7 @@ export function SidePanel() {
           type: 'START_SCAN',
           url: activeTabUrl,
           runId: scanData.data.runId,
-          appId,
+          runnerId,
         });
         setError(null);
       } else {
@@ -255,7 +255,7 @@ export function SidePanel() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeTabUrl, token, selectedEntityId, selectedProjectId, user?.uid]);
+  }, [activeTabUrl, token, selectedEntityId, selectedProductId, user?.uid]);
 
   // Auto-scroll event log
   useEffect(() => {
@@ -337,9 +337,9 @@ export function SidePanel() {
     label: e.displayName || e.entitySlug,
   }));
 
-  const projectOptions = [
-    ...projects.map(p => ({ value: String(p.id), label: p.name })),
-    { value: '__create__', label: '+ Create Project' },
+  const productOptions = [
+    ...products.map(p => ({ value: String(p.id), label: p.title })),
+    { value: '__create__', label: '+ Create Product' },
   ];
 
   return (
@@ -364,7 +364,7 @@ export function SidePanel() {
         </div>
       </div>
 
-      {/* Workspace & Project selectors */}
+      {/* Workspace & Product selectors */}
       {!isScanning && (
         <div className='space-y-2'>
           <div>
@@ -376,7 +376,7 @@ export function SidePanel() {
               value={selectedEntityId || ''}
               onChange={value => {
                 setSelectedEntityId(value);
-                setSelectedProjectId('');
+                setSelectedProductId('');
               }}
               placeholder={loadingEntities ? 'Loading...' : 'Select workspace'}
               disabled={loadingEntities}
@@ -387,15 +387,15 @@ export function SidePanel() {
 
           <div>
             <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-              Project
+              Product
             </label>
             <Combobox
-              options={projectOptions}
-              value={selectedProjectId}
-              onChange={value => setSelectedProjectId(value)}
-              placeholder={loadingProjects ? 'Loading...' : 'Select project...'}
-              disabled={loadingProjects}
-              emptyMessage='No projects — select "Create Project"'
+              options={productOptions}
+              value={selectedProductId}
+              onChange={value => setSelectedProductId(value)}
+              placeholder={loadingProducts ? 'Loading...' : 'Select product...'}
+              disabled={loadingProducts}
+              emptyMessage='No products — select "Create Product"'
               className='w-full'
             />
           </div>
@@ -406,7 +406,7 @@ export function SidePanel() {
       {activeTabUrl && !isScanning && (
         <button
           onClick={handleTestCurrentPage}
-          disabled={isSubmitting || !selectedProjectId || !selectedEntityId}
+          disabled={isSubmitting || !selectedProductId || !selectedEntityId}
           className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
         >
           {isSubmitting

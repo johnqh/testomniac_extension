@@ -27,7 +27,7 @@ let apiKey = DEFAULT_API_KEY;
 interface ScanState {
   isRunning: boolean;
   scanId: number | null;
-  appId: number | null;
+  runnerId: number | null;
   phase: string;
   pagesFound: number;
   pageStatesFound: number;
@@ -42,7 +42,7 @@ interface ScanState {
 let scanState: ScanState = {
   isRunning: false,
   scanId: null,
-  appId: null,
+  runnerId: null,
   phase: 'idle',
   pagesFound: 0,
   pageStatesFound: 0,
@@ -58,7 +58,7 @@ function resetState() {
   scanState = {
     isRunning: false,
     scanId: null,
-    appId: null,
+    runnerId: null,
     phase: 'idle',
     pagesFound: 0,
     pageStatesFound: 0,
@@ -126,16 +126,16 @@ async function startScan(url: string, runId: number) {
   }
 
   try {
-    // Get app info from this specific run
+    // Get runner info from this specific run
     LOG(`Fetching run ${runId} from API...`);
     const run = await api.getTestRun(runId);
     LOG(`getTestRun result:`, run);
     if (!run) {
       throw new Error(`Run ${runId} not found`);
     }
-    scanState.appId = run.appId;
-    const appId = run.appId;
-    LOG(`App ID: ${appId}`);
+    scanState.runnerId = run.runnerId;
+    const runnerId = run.runnerId;
+    LOG(`Runner ID: ${runnerId}`);
 
     // Get or create a tab
     LOG('Querying active tab...');
@@ -247,13 +247,13 @@ async function startScan(url: string, runId: number) {
 
     // Call the shared orchestrator
     LOG(
-      `Calling runScan(adapter, {scanId=${runId}, appId=${appId}, scanUrl=${url}, baseUrl=${new URL(url).origin}}, api, eventHandler)`
+      `Calling runScan(adapter, {scanId=${runId}, runnerId=${runnerId}, scanUrl=${url}, baseUrl=${new URL(url).origin}}, api, eventHandler)`
     );
     const result = await runScan(
       adapter,
       {
         scanId: runId,
-        appId,
+        runnerId,
         scanUrl: url,
         baseUrl: new URL(url).origin,
         sizeClass: 'desktop',
