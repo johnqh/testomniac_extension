@@ -198,6 +198,15 @@ async function startScan(url: string, runId: number) {
         );
         addEvent('test_suite_created', suite.title);
       },
+      onTestCaseRunCompleted(run) {
+        LOG(
+          `[event] testCaseRunCompleted: testCaseRunId=${run.testCaseRunId} passed=${run.passed}`
+        );
+        addEvent(
+          run.passed ? 'test_case_passed' : 'test_case_failed',
+          `Test case run ${run.testCaseRunId}`
+        );
+      },
       onTestRunCompleted(run) {
         LOG(
           `[event] testRunCompleted: testRunId=${run.testRunId} passed=${run.passed}`
@@ -253,10 +262,13 @@ async function startScan(url: string, runId: number) {
       adapter,
       {
         scanId: runId,
+        testRunId: runId,
         runnerId,
         scanUrl: url,
         baseUrl: new URL(url).origin,
         sizeClass: 'desktop',
+        runnerInstanceId: crypto.randomUUID(),
+        runnerInstanceName: 'chrome-extension',
         signal: scanAbortController?.signal,
       },
       api,

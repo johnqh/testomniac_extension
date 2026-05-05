@@ -152,7 +152,21 @@ export function SidePanel() {
 
   // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
-    if (!activeTabUrl || !token || !selectedEntityId) return;
+    console.log('[SidePanel] handleTestCurrentPage called', {
+      activeTabUrl,
+      hasToken: !!token,
+      selectedEntityId,
+      selectedProductId,
+      userId: user?.uid,
+    });
+    if (!activeTabUrl || !token || !selectedEntityId) {
+      console.log('[SidePanel] Aborting: missing required fields', {
+        activeTabUrl: !!activeTabUrl,
+        token: !!token,
+        selectedEntityId: !!selectedEntityId,
+      });
+      return;
+    }
     setError(null);
     setIsSubmitting(true);
 
@@ -170,6 +184,10 @@ export function SidePanel() {
           currentWindow: true,
         });
         const title = activeTab?.title || new URL(activeTabUrl).hostname;
+        console.log('[SidePanel] Creating new product:', {
+          entityId: selectedEntityId,
+          title,
+        });
         const createRes = await fetch(`${API_URL}/api/v1/products`, {
           method: 'POST',
           headers,
@@ -179,28 +197,27 @@ export function SidePanel() {
           }),
         });
         const createData = await createRes.json();
+        console.log('[SidePanel] Create product response:', createData);
         if (!createData.success || !createData.data?.id) {
-          setError(
+          const err =
             createData.error ||
-              createData.data?.message ||
-              'Failed to create product'
-          );
+            createData.data?.message ||
+            'Failed to create product';
+          console.error('[SidePanel] Product creation failed:', err);
+          setError(err);
           return;
         }
         productId = createData.data.id;
+        console.log('[SidePanel] Product created, id:', productId);
         setProducts(prev => [...prev, createData.data]);
         setSelectedProductId(String(productId));
       } else {
         productId = Number(selectedProductId);
+        console.log('[SidePanel] Using existing product:', productId);
       }
 
       // Create or reuse runner under the product
-      console.log(
-        '[SidePanel] Creating runner under product',
-        productId,
-        'selectedProductId:',
-        selectedProductId
-      );
+      console.log('[SidePanel] Creating runner under product', productId);
       const runnerRes = await fetch(
         `${API_URL}/api/v1/products/${productId}/runners`,
         {
@@ -214,13 +231,18 @@ export function SidePanel() {
         }
       );
       const runnerData = await runnerRes.json();
+      console.log('[SidePanel] Create runner response:', runnerData);
       if (!runnerData.success || !runnerData.data?.id) {
-        setError(runnerData.error || 'Failed to create runner');
+        const err = runnerData.error || 'Failed to create runner';
+        console.error('[SidePanel] Runner creation failed:', err);
+        setError(err);
         return;
       }
       const runnerId = runnerData.data.id;
+      console.log('[SidePanel] Runner created, id:', runnerId);
 
       // Create scan
+      console.log('[SidePanel] Creating scan for URL:', activeTabUrl);
       const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
         method: 'POST',
         headers,
@@ -231,7 +253,14 @@ export function SidePanel() {
         }),
       });
       const scanData = await scanRes.json();
-      if (scanData.success && scanData.data?.runId) {
+      console.log('[SidePanel] Create scan response:', scanData);
+      if (scanData.success && scanData.data?.testRunId) {
+        console.log(
+          '[SidePanel] Scan created, testRunId:',
+          scanData.data.testRunId,
+          'runnerId:',
+          runnerId
+        );
         setProgress({
           ...initialProgress,
           phase: 'scanning',
@@ -241,16 +270,18 @@ export function SidePanel() {
         chrome.runtime.sendMessage({
           type: 'START_SCAN',
           url: activeTabUrl,
-          runId: scanData.data.runId,
+          runId: scanData.data.testRunId,
           runnerId,
         });
         setError(null);
       } else {
-        setError(
-          scanData.data?.message || scanData.error || 'Failed to submit scan'
-        );
+        const err =
+          scanData.data?.message || scanData.error || 'Failed to submit scan';
+        console.error('[SidePanel] Scan creation failed:', err, scanData);
+        setError(err);
       }
-    } catch {
+    } catch (err) {
+      console.error('[SidePanel] handleTestCurrentPage error:', err);
       setError('Failed to connect to API');
     } finally {
       setIsSubmitting(false);
