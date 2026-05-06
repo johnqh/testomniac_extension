@@ -457,13 +457,20 @@ export class ChromeAdapter implements BrowserAdapter {
           marker.style.pointerEvents = 'none';
           marker.style.zIndex = '2147483647';
           marker.style.boxSizing = 'border-box';
-          marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
-          marker.style.background = 'rgba(245, 158, 11, 0.2)';
           marker.style.borderRadius = '8px';
           marker.style.opacity = '1';
           marker.style.transition =
-            'left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, opacity 180ms ease-out';
+            'left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, opacity 180ms ease-out, border-color 120ms ease-out, background 120ms ease-out';
           document.documentElement.appendChild(marker);
+        }
+
+        // Yellow/amber for click, blue/cyan for hover
+        if (interaction === 'click') {
+          marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
+          marker.style.background = 'rgba(245, 158, 11, 0.2)';
+        } else {
+          marker.style.border = '2px solid rgba(59, 130, 246, 0.9)';
+          marker.style.background = 'rgba(59, 130, 246, 0.2)';
         }
 
         marker.style.left = `${rect.left - 4}px`;
@@ -490,6 +497,18 @@ export class ChromeAdapter implements BrowserAdapter {
         window.setTimeout(() => marker.remove(), 180);
       },
     });
+  }
+
+  async closeOtherTabs(): Promise<void> {
+    const tabs = await chrome.tabs.query({ currentWindow: true });
+    const otherTabIds = tabs
+      .filter(t => t.id !== this.tabId && t.id != null)
+      .map(t => t.id!);
+    if (otherTabIds.length > 0) {
+      await chrome.tabs.remove(otherTabIds);
+    }
+    // Re-focus the original tab
+    await chrome.tabs.update(this.tabId, { active: true });
   }
 
   private async waitForTabLoad(timeout: number): Promise<void> {
