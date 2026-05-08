@@ -6,9 +6,14 @@ import {
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
 import { LoginPage } from '@sudobility/building_blocks';
-import { Combobox } from '@sudobility/components';
+import { Combobox, Input } from '@sudobility/components';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
 import { chromeGoogleSignIn } from './auth/googleSignIn';
+import {
+  environmentOptions,
+  resolveEnvironmentContext,
+  type EnvironmentChoice,
+} from '../shared/environment';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
@@ -24,24 +29,79 @@ interface ProductOption {
   entityId: string | null;
 }
 
+interface ResolveEnvironmentApiResponse {
+  testEnvironmentId: number;
+  kind: 'local' | 'shared';
+  label: string;
+  ownerUserId: string | null;
+  resolutionMode: 'local_user_owned' | 'shared_labeled';
+}
+
 interface ScanProgress {
+  isRunning?: boolean;
+  scanId?: number | null;
   phase: string;
   pagesFound: number;
   pageStatesFound: number;
   testRunsCompleted: number;
   findingsFound: number;
+  aiSummary?: string | null;
+  expertiseSummary?: Record<
+    string,
+    {
+      warnings: number;
+      errors: number;
+    }
+  > | null;
+  environmentKind?: 'local' | 'shared';
+  environmentLabel?: string | null;
+  environmentHostname?: string | null;
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
   isComplete: boolean;
   events: Array<{ type: string; message: string; timestamp: number }>;
 }
 
+interface RunSummary {
+  runId: number;
+  rootRunId: number;
+  runnerId: number;
+  testEnvironmentId: number | null;
+  status: string;
+  aiSummary: string | null;
+  pagesFound: number | null;
+  pageStatesFound: number | null;
+  testRunsCompleted: number | null;
+  totalFindings: number;
+  expertiseSummary: Record<
+    string,
+    {
+      warnings: number;
+      errors: number;
+      findings: number;
+    }
+  >;
+  recentFindings: Array<{
+    id: number;
+    type: string;
+    title: string;
+    description: string;
+    expertise: string | null;
+    createdAt: string | null;
+  }>;
+  completedAt: string | null;
+  createdAt: string | null;
+}
+
 const initialProgress: ScanProgress = {
+  scanId: null,
   phase: 'idle',
   pagesFound: 0,
   pageStatesFound: 0,
   testRunsCompleted: 0,
   findingsFound: 0,
+  aiSummary: null,
+  expertiseSummary: null,
   currentPageUrl: null,
   latestScreenshotDataUrl: null,
   isComplete: false,
@@ -57,6 +117,7 @@ export function SidePanel() {
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ScanProgress>(initialProgress);
+  const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
@@ -68,6 +129,9 @@ export function SidePanel() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [loadingEntities, setLoadingEntities] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [selectedEnvironment, setSelectedEnvironment] =
+    useState<EnvironmentChoice>('production');
+  const [customEnvironmentLabel, setCustomEnvironmentLabel] = useState('');
 
   // Fetch entities when authenticated
   useEffect(() => {
@@ -150,6 +214,29 @@ export function SidePanel() {
     };
   }, []);
 
+  const environmentContext = resolveEnvironmentContext(
+    activeTabUrl,
+    selectedEnvironment,
+    customEnvironmentLabel
+  );
+  const {
+    hostname: activeHostname,
+    isLocalEnvironment,
+    kind: environmentKind,
+    label: resolvedEnvironmentLabel,
+  } = environmentContext;
+
+  useEffect(() => {
+    if (isLocalEnvironment) {
+      setSelectedEnvironment('production');
+      setCustomEnvironmentLabel('');
+    }
+  }, [isLocalEnvironment, activeTabUrl]);
+
+  const isEnvironmentSelectionValid = isLocalEnvironment
+    ? true
+    : resolvedEnvironmentLabel.length > 0;
+
   // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
     console.log('[SidePanel] handleTestCurrentPage called', {
@@ -157,13 +244,21 @@ export function SidePanel() {
       hasToken: !!token,
       selectedEntityId,
       selectedProductId,
+      selectedEnvironment,
+      resolvedEnvironmentLabel,
       userId: user?.uid,
     });
-    if (!activeTabUrl || !token || !selectedEntityId) {
+    if (
+      !activeTabUrl ||
+      !token ||
+      !selectedEntityId ||
+      !isEnvironmentSelectionValid
+    ) {
       console.log('[SidePanel] Aborting: missing required fields', {
         activeTabUrl: !!activeTabUrl,
         token: !!token,
         selectedEntityId: !!selectedEntityId,
+        isEnvironmentSelectionValid,
       });
       return;
     }
@@ -223,30 +318,45 @@ export function SidePanel() {
         console.log('[SidePanel] Using existing product:', productId);
       }
 
-      // Create or reuse runner under the product
-      console.log('[SidePanel] Creating runner under product', productId);
-      const runnerRes = await fetch(
-        `${API_URL}/api/v1/products/${productId}/runners`,
+      const baseUrl = new URL(activeTabUrl).origin;
+
+      // Resolve environment before scan creation
+      console.log('[SidePanel] Resolving environment for product', productId);
+      const environmentRes = await fetch(
+        `${API_URL}/api/v1/test-environments/resolve`,
         {
           method: 'POST',
           headers,
           body: JSON.stringify({
             productId,
-            title: new URL(activeTabUrl).hostname,
-            type: 'extension',
+            url: activeTabUrl,
+            baseUrl,
+            source: 'extension',
+            environmentLabel: isLocalEnvironment
+              ? undefined
+              : resolvedEnvironmentLabel,
           }),
         }
       );
-      const runnerData = await runnerRes.json();
-      console.log('[SidePanel] Create runner response:', runnerData);
-      if (!runnerData.success || !runnerData.data?.id) {
-        const err = runnerData.error || 'Failed to create runner';
-        console.error('[SidePanel] Runner creation failed:', err);
+      const environmentData = await environmentRes.json();
+      console.log('[SidePanel] Resolve environment response:', environmentData);
+      if (
+        !environmentData.success ||
+        !environmentData.data?.testEnvironmentId
+      ) {
+        const err =
+          environmentData.error || 'Failed to resolve scan environment';
+        console.error('[SidePanel] Environment resolution failed:', err);
         setError(err);
         return;
       }
-      const runnerId = runnerData.data.id;
-      console.log('[SidePanel] Runner created, id:', runnerId);
+      const resolvedEnvironment =
+        environmentData.data as ResolveEnvironmentApiResponse;
+      console.log(
+        '[SidePanel] Environment resolved:',
+        resolvedEnvironment.testEnvironmentId,
+        resolvedEnvironment.label
+      );
 
       // Create scan
       console.log('[SidePanel] Creating scan for URL:', activeTabUrl);
@@ -255,8 +365,12 @@ export function SidePanel() {
         headers,
         body: JSON.stringify({
           url: activeTabUrl,
+          productId,
+          testEnvironmentId: resolvedEnvironment.testEnvironmentId,
           createdByUserId: user?.uid,
           ownedByUserId: user?.uid,
+          environmentLabel: resolvedEnvironmentLabel,
+          environmentKind,
         }),
       });
       const scanData = await scanRes.json();
@@ -265,20 +379,27 @@ export function SidePanel() {
         console.log(
           '[SidePanel] Scan created, testRunId:',
           scanData.data.testRunId,
-          'runnerId:',
-          runnerId
+          'environment:',
+          resolvedEnvironment.testEnvironmentId
         );
         setProgress({
           ...initialProgress,
+          scanId: scanData.data.testRunId,
           phase: 'scanning',
+          environmentKind: resolvedEnvironment.kind,
+          environmentLabel: resolvedEnvironment.label,
+          environmentHostname: activeHostname,
           currentPageUrl: activeTabUrl,
         });
+        setRunSummary(null);
         setIsScanning(true);
         chrome.runtime.sendMessage({
           type: 'START_SCAN',
           url: activeTabUrl,
           runId: scanData.data.testRunId,
-          runnerId,
+          environmentLabel: resolvedEnvironment.label,
+          environmentKind: resolvedEnvironment.kind,
+          environmentHostname: activeHostname,
         });
         setError(null);
       } else {
@@ -293,7 +414,19 @@ export function SidePanel() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [activeTabUrl, token, selectedEntityId, selectedProductId, user?.uid]);
+  }, [
+    activeTabUrl,
+    activeHostname,
+    environmentKind,
+    token,
+    selectedEntityId,
+    selectedProductId,
+    selectedEnvironment,
+    resolvedEnvironmentLabel,
+    isLocalEnvironment,
+    isEnvironmentSelectionValid,
+    user?.uid,
+  ]);
 
   // Auto-scroll event log
   useEffect(() => {
@@ -304,6 +437,20 @@ export function SidePanel() {
 
   // Listen for progress updates from background
   useEffect(() => {
+    chrome.runtime
+      .sendMessage({ type: 'GET_SCAN_STATE' })
+      .then(response => {
+        const data = response?.data as ScanProgress | undefined;
+        if (!data) return;
+        setProgress(data);
+        if (data.isRunning) {
+          setIsScanning(true);
+        } else if (data.isComplete) {
+          setIsScanning(false);
+        }
+      })
+      .catch(() => {});
+
     const listener = (message: { type: string; data?: ScanProgress }) => {
       if (message.type === 'SCAN_PROGRESS' && message.data) {
         setProgress(message.data);
@@ -322,6 +469,46 @@ export function SidePanel() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, []);
 
+  useEffect(() => {
+    if (!token || !progress.scanId) return;
+    if (!progress.isComplete && progress.phase !== 'completed') return;
+
+    let cancelled = false;
+
+    fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(response => response.json())
+      .then(data => {
+        if (cancelled || !data?.success || !data.data) return;
+        const summary = data.data as RunSummary;
+        setRunSummary(summary);
+        setProgress(prev => ({
+          ...prev,
+          aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+          expertiseSummary:
+            Object.keys(summary.expertiseSummary ?? {}).length > 0
+              ? Object.fromEntries(
+                  Object.entries(summary.expertiseSummary).map(
+                    ([name, counts]) => [
+                      name,
+                      {
+                        warnings: counts.warnings,
+                        errors: counts.errors,
+                      },
+                    ]
+                  )
+                )
+              : (prev.expertiseSummary ?? null),
+        }));
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, progress.scanId, progress.isComplete, progress.phase]);
+
   const handleStop = useCallback(() => {
     chrome.runtime.sendMessage({ type: 'STOP_SCAN' });
     setIsScanning(false);
@@ -335,6 +522,30 @@ export function SidePanel() {
   ];
 
   const currentPhaseIndex = phases.findIndex(p => p.key === progress.phase);
+  const expertiseSummaryEntries = Object.entries(
+    progress.expertiseSummary ?? {}
+  ).sort(([left], [right]) => left.localeCompare(right));
+  const findingRows =
+    runSummary?.recentFindings.map(finding => ({
+      key: String(finding.id),
+      timestamp: finding.createdAt
+        ? new Date(finding.createdAt).getTime()
+        : Date.now(),
+      badge: finding.type,
+      message: finding.expertise
+        ? `[${finding.expertise}] ${finding.title}`
+        : finding.title,
+      description: finding.description,
+    })) ??
+    progress.events
+      .filter(e => e.type === 'finding')
+      .map((event, index) => ({
+        key: `${event.timestamp}-${index}`,
+        timestamp: event.timestamp,
+        badge: 'finding',
+        message: event.message,
+        description: '',
+      }));
 
   if (loading) {
     return (
@@ -437,6 +648,47 @@ export function SidePanel() {
               className='w-full'
             />
           </div>
+
+          {activeTabUrl && (
+            <div>
+              <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                Environment
+              </label>
+              {isLocalEnvironment ? (
+                <div className='rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>
+                  Local environment for {user?.email || 'current user'} on{' '}
+                  {activeHostname}
+                </div>
+              ) : (
+                <div className='space-y-2'>
+                  <Combobox
+                    options={environmentOptions}
+                    value={selectedEnvironment}
+                    onChange={value =>
+                      setSelectedEnvironment(value as EnvironmentChoice)
+                    }
+                    placeholder='Select environment'
+                    emptyMessage='No environments found'
+                    className='w-full'
+                  />
+                  {selectedEnvironment === 'custom' && (
+                    <Input
+                      value={customEnvironmentLabel}
+                      onChange={e => setCustomEnvironmentLabel(e.target.value)}
+                      placeholder='Enter environment label'
+                    />
+                  )}
+                  <div className='text-[10px] text-gray-500'>
+                    Scans for {activeHostname} will be stored under{' '}
+                    <span className='font-medium text-gray-700'>
+                      {resolvedEnvironmentLabel || 'an environment label'}
+                    </span>
+                    .
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -444,7 +696,12 @@ export function SidePanel() {
       {activeTabUrl && !isScanning && (
         <button
           onClick={handleTestCurrentPage}
-          disabled={isSubmitting || !selectedProductId || !selectedEntityId}
+          disabled={
+            isSubmitting ||
+            !selectedProductId ||
+            !selectedEntityId ||
+            !isEnvironmentSelectionValid
+          }
           className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
         >
           {isSubmitting
@@ -466,6 +723,17 @@ export function SidePanel() {
       {error && (
         <div className='p-2 rounded-md bg-red-50 text-red-700 text-xs'>
           {error}
+        </div>
+      )}
+
+      {activeTabUrl && (
+        <div className='flex items-center justify-between rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-[11px] text-gray-600'>
+          <span className='font-medium text-gray-500'>Environment</span>
+          <span className='truncate ml-2 text-gray-700'>
+            {isLocalEnvironment
+              ? `Local (${activeHostname})`
+              : `${resolvedEnvironmentLabel} (${activeHostname})`}
+          </span>
         </div>
       )}
 
@@ -591,6 +859,39 @@ export function SidePanel() {
         <div className='rounded-md border border-gray-200 overflow-hidden'>
           {resultTab === 'overview' && (
             <>
+              {(progress.aiSummary || expertiseSummaryEntries.length > 0) && (
+                <div className='border-b border-gray-200 bg-white'>
+                  {progress.aiSummary && (
+                    <div className='px-3 py-2 text-[11px] leading-5 text-gray-700'>
+                      {progress.aiSummary}
+                    </div>
+                  )}
+                  {expertiseSummaryEntries.length > 0 && (
+                    <div className='px-3 pb-2 grid grid-cols-2 gap-2'>
+                      {expertiseSummaryEntries.map(([name, counts]) => (
+                        <div
+                          key={name}
+                          className='rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5'
+                        >
+                          <div className='text-[10px] font-medium uppercase tracking-wide text-gray-500'>
+                            {name}
+                          </div>
+                          <div className='mt-1 flex gap-2 text-[11px]'>
+                            <span className='text-red-600'>
+                              {counts.errors} error
+                              {counts.errors === 1 ? '' : 's'}
+                            </span>
+                            <span className='text-amber-600'>
+                              {counts.warnings} warning
+                              {counts.warnings === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
               {progress.currentPageUrl && (
                 <div className='bg-gray-50 px-2 py-1 border-b border-gray-200 flex items-center justify-between'>
                   <span className='text-[10px] font-medium text-gray-500'>
@@ -662,22 +963,24 @@ export function SidePanel() {
               ref={eventLogRef}
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
-              {progress.events
-                .filter(e => e.type === 'finding')
-                .map((event, i) => (
-                  <div
-                    key={i}
-                    className='px-2 py-1 border-b border-gray-100 last:border-0'
-                  >
-                    <span className='text-gray-400'>
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>{' '}
-                    <span className='text-red-600'>finding</span>{' '}
-                    <span className='text-gray-700'>{event.message}</span>
-                  </div>
-                ))}
-              {progress.events.filter(e => e.type === 'finding').length ===
-                0 && (
+              {findingRows.map(finding => (
+                <div
+                  key={finding.key}
+                  className='px-2 py-1 border-b border-gray-100 last:border-0'
+                >
+                  <span className='text-gray-400'>
+                    {new Date(finding.timestamp).toLocaleTimeString()}
+                  </span>{' '}
+                  <span className='text-red-600'>{finding.badge}</span>{' '}
+                  <span className='text-gray-700'>{finding.message}</span>
+                  {finding.description && (
+                    <div className='mt-0.5 text-gray-500 leading-4'>
+                      {finding.description}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {findingRows.length === 0 && (
                 <div className='p-3 text-center text-gray-400'>
                   No findings yet
                 </div>

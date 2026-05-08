@@ -33,10 +33,35 @@ interface ScanState {
   pageStatesFound: number;
   testRunsCompleted: number;
   findingsFound: number;
+  environmentKind: 'local' | 'shared' | null;
+  environmentLabel: string | null;
+  environmentHostname: string | null;
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
+  aiSummary: string | null;
+  expertiseSummary: Record<
+    string,
+    {
+      warnings: number;
+      errors: number;
+    }
+  > | null;
   events: Array<{ type: string; message: string; timestamp: number }>;
   isComplete: boolean;
+}
+
+interface ScanCompleteSummary {
+  totalPages: number;
+  totalFindings: number;
+  durationMs: number;
+  aiSummary?: string;
+  expertiseSummary?: Record<
+    string,
+    {
+      warnings: number;
+      errors: number;
+    }
+  >;
 }
 
 let scanState: ScanState = {
@@ -48,11 +73,54 @@ let scanState: ScanState = {
   pageStatesFound: 0,
   testRunsCompleted: 0,
   findingsFound: 0,
+  environmentKind: null,
+  environmentLabel: null,
+  environmentHostname: null,
   currentPageUrl: null,
   latestScreenshotDataUrl: null,
+  aiSummary: null,
+  expertiseSummary: null,
   events: [],
   isComplete: false,
 };
+
+const SCAN_STATE_STORAGE_KEY = 'scanState';
+
+function getSerializableScanState(): ScanState {
+  return { ...scanState, events: [...scanState.events] };
+}
+
+function persistScanState() {
+  return chrome.storage.local
+    .set({
+      [SCAN_STATE_STORAGE_KEY]: getSerializableScanState(),
+    })
+    .catch(error => {
+      ERR('Failed to persist scan state', error);
+    });
+}
+
+async function restoreScanState() {
+  try {
+    const stored = await chrome.storage.local.get([SCAN_STATE_STORAGE_KEY]);
+    const saved = stored[SCAN_STATE_STORAGE_KEY] as ScanState | undefined;
+    if (!saved) return;
+
+    scanState = {
+      ...scanState,
+      ...saved,
+      events: Array.isArray(saved.events) ? saved.events : [],
+    };
+    LOG('Restored persisted scan state', {
+      scanId: scanState.scanId,
+      phase: scanState.phase,
+      isComplete: scanState.isComplete,
+      isRunning: scanState.isRunning,
+    });
+  } catch (error) {
+    ERR('Failed to restore scan state', error);
+  }
+}
 
 function resetState() {
   scanState = {
@@ -64,11 +132,17 @@ function resetState() {
     pageStatesFound: 0,
     testRunsCompleted: 0,
     findingsFound: 0,
+    environmentKind: null,
+    environmentLabel: null,
+    environmentHostname: null,
     currentPageUrl: null,
     latestScreenshotDataUrl: null,
+    aiSummary: null,
+    expertiseSummary: null,
     events: [],
     isComplete: false,
   };
+  void persistScanState();
 }
 
 function addEvent(type: string, message: string) {
@@ -79,6 +153,7 @@ function addEvent(type: string, message: string) {
 }
 
 function sendProgressToSidePanel() {
+  void persistScanState();
   chrome.runtime
     .sendMessage({ type: 'SCAN_PROGRESS', data: { ...scanState } })
     .catch(() => {});
@@ -98,7 +173,15 @@ async function loadConfig() {
 
 let scanAbortController: AbortController | null = null;
 
-async function startScan(url: string, runId: number) {
+async function startScan(
+  url: string,
+  runId: number,
+  environment?: {
+    kind?: 'local' | 'shared';
+    label?: string;
+    hostname?: string;
+  }
+) {
   // Cancel any previous scan
   scanAbortController?.abort();
   scanAbortController = new AbortController();
@@ -110,7 +193,13 @@ async function startScan(url: string, runId: number) {
   scanState.isRunning = true;
   scanState.phase = 'scanning';
   scanState.scanId = runId;
-  addEvent('scan_started', `Scanning ${url}`);
+  scanState.environmentKind = environment?.kind ?? null;
+  scanState.environmentLabel = environment?.label ?? null;
+  scanState.environmentHostname = environment?.hostname ?? null;
+  addEvent(
+    'scan_started',
+    `Scanning ${url}${environment?.label ? ` [${environment.label}]` : ''}`
+  );
 
   LOG(`Creating ApiClient with baseUrl=${apiUrl}, hasApiKey=${!!apiKey}`);
   const api = apiKey ? new ApiClient(apiUrl, apiKey) : null;
@@ -236,12 +325,14 @@ async function startScan(url: string, runId: number) {
         scanState.currentPageUrl = data.pageUrl;
         sendProgressToSidePanel();
       },
-      onScanComplete(summary) {
+      onScanComplete(summary: ScanCompleteSummary) {
         LOG(
           `[event] scanComplete: pages=${summary.totalPages} findings=${summary.totalFindings} duration=${summary.durationMs}ms`
         );
         scanState.isComplete = true;
         scanState.phase = 'completed';
+        scanState.aiSummary = summary.aiSummary ?? null;
+        scanState.expertiseSummary = summary.expertiseSummary ?? null;
         addEvent(
           'run_completed',
           `Completed: ${summary.totalPages} pages, ${summary.totalFindings} findings`
@@ -264,6 +355,7 @@ async function startScan(url: string, runId: number) {
         scanId: runId,
         testRunId: runId,
         runnerId,
+        testEnvironmentId: run.testEnvironmentId ?? undefined,
         scanUrl: url,
         baseUrl: new URL(url).origin,
         sizeClass: 'desktop',
@@ -296,9 +388,18 @@ async function startScan(url: string, runId: number) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   LOG(`Message received: ${message.type}`);
 
+  if (message.type === 'GET_SCAN_STATE') {
+    sendResponse({ ok: true, data: { ...scanState } });
+    return true;
+  }
+
   if (message.type === 'START_SCAN' && message.url && message.runId) {
     LOG(`START_SCAN: url=${message.url}, runId=${message.runId}`);
-    startScan(message.url, message.runId);
+    startScan(message.url, message.runId, {
+      kind: message.environmentKind,
+      label: message.environmentLabel,
+      hostname: message.environmentHostname,
+    });
     sendResponse({ ok: true });
   } else if (message.type === 'STOP_SCAN') {
     LOG('STOP_SCAN — aborting scan');
@@ -334,5 +435,5 @@ chrome.action.onClicked.addListener(async tab => {
   }
 });
 
-// Load config on startup
-loadConfig();
+// Load config and restore persisted scan state on startup
+void Promise.all([loadConfig(), restoreScanState()]);

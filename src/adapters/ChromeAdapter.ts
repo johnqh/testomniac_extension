@@ -9,6 +9,10 @@ export class ChromeAdapter implements BrowserAdapter {
   private currentUrl: string = '';
   private debuggerAttached: boolean = false;
   private markerVisible: boolean = false;
+  private debuggerEventsBound: boolean = false;
+  private consoleHandlers = new Set<(...args: unknown[]) => void>();
+  private responseHandlers = new Set<(...args: unknown[]) => void>();
+  private requestMetadata = new Map<string, { method: string; url: string }>();
 
   constructor(tabId: number) {
     this.tabId = tabId;
@@ -18,6 +22,7 @@ export class ChromeAdapter implements BrowserAdapter {
     url: string,
     options?: { waitUntil?: string; timeout?: number }
   ): Promise<void> {
+    await this.ensureDebugger();
     await chrome.tabs.update(this.tabId, { url });
     await this.waitForTabLoad(options?.timeout || 30000);
     this.currentUrl = (await chrome.tabs.get(this.tabId)).url || url;
@@ -411,21 +416,29 @@ export class ChromeAdapter implements BrowserAdapter {
       }
       this.debuggerAttached = false;
     }
+    this.requestMetadata.clear();
     await chrome.tabs.remove(this.tabId);
   }
 
   on(
-    _event: 'console' | 'response',
-    _handler: (...args: unknown[]) => void
+    event: 'console' | 'response',
+    handler: (...args: unknown[]) => void
   ): void {
-    // Console and network monitoring would need CDP Runtime.enable / Network.enable
-    // For now, these are no-ops — the content script handles error monitoring
+    if (event === 'console') {
+      this.consoleHandlers.add(handler);
+    } else {
+      this.responseHandlers.add(handler);
+    }
+    void this.ensureDebugger();
   }
 
   // --- Private helpers ---
 
   private async ensureDebugger(): Promise<void> {
-    if (this.debuggerAttached) return;
+    if (this.debuggerAttached) {
+      this.bindDebuggerEvents();
+      return;
+    }
     try {
       await chrome.debugger.attach({ tabId: this.tabId }, '1.3');
       this.debuggerAttached = true;
@@ -433,6 +446,115 @@ export class ChromeAdapter implements BrowserAdapter {
       // May already be attached
       this.debuggerAttached = true;
     }
+    this.bindDebuggerEvents();
+    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable');
+    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable');
+    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable');
+    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable');
+  }
+
+  private bindDebuggerEvents(): void {
+    if (this.debuggerEventsBound) return;
+    this.debuggerEventsBound = true;
+
+    chrome.debugger.onEvent.addListener((source, method, params) => {
+      if (source.tabId !== this.tabId) {
+        return;
+      }
+
+      if (method === 'Runtime.consoleAPICalled') {
+        const payload = params as {
+          type?: string;
+          args?: Array<{ value?: unknown; description?: string }>;
+        };
+        const parts = (payload.args ?? []).map(arg => {
+          if (arg.value != null) return String(arg.value);
+          if (arg.description) return arg.description;
+          return '';
+        });
+        const message = [payload.type, ...parts]
+          .filter(Boolean)
+          .join(': ')
+          .trim();
+        if (message) {
+          for (const handler of this.consoleHandlers) {
+            handler(message);
+          }
+        }
+        return;
+      }
+
+      if (method === 'Log.entryAdded') {
+        const payload = params as {
+          entry?: {
+            level?: string;
+            text?: string;
+            url?: string;
+          };
+        };
+        const text = payload.entry?.text?.trim();
+        if (text) {
+          const prefix = payload.entry?.level ? `${payload.entry.level}: ` : '';
+          const suffix = payload.entry?.url ? ` (${payload.entry.url})` : '';
+          for (const handler of this.consoleHandlers) {
+            handler(`${prefix}${text}${suffix}`);
+          }
+        }
+        return;
+      }
+
+      if (method === 'Network.requestWillBeSent') {
+        const payload = params as {
+          requestId?: string;
+          request?: {
+            method?: string;
+            url?: string;
+          };
+        };
+        if (payload.requestId && payload.request) {
+          this.requestMetadata.set(payload.requestId, {
+            method: payload.request.method || 'GET',
+            url: payload.request.url || '',
+          });
+        }
+        return;
+      }
+
+      if (method === 'Network.responseReceived') {
+        const payload = params as {
+          requestId?: string;
+          response?: {
+            url?: string;
+            status?: number;
+            mimeType?: string;
+          };
+        };
+        if (!payload.requestId || !payload.response) {
+          return;
+        }
+        const request = this.requestMetadata.get(payload.requestId);
+        const entry = {
+          method: request?.method || 'GET',
+          url: payload.response.url || request?.url || '',
+          status: payload.response.status || 0,
+          contentType: payload.response.mimeType || '',
+        };
+        for (const handler of this.responseHandlers) {
+          handler(entry);
+        }
+        return;
+      }
+
+      if (
+        method === 'Network.loadingFailed' ||
+        method === 'Network.loadingFinished'
+      ) {
+        const payload = params as { requestId?: string };
+        if (payload.requestId) {
+          this.requestMetadata.delete(payload.requestId);
+        }
+      }
+    });
   }
 
   private async showInteractionMarker(
