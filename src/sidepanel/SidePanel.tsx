@@ -171,9 +171,16 @@ export function SidePanel() {
     setIsSubmitting(true);
 
     try {
+      // Force-refresh the Firebase token before API calls to avoid stale tokens
+      const auth = (await import('firebase/auth')).getAuth();
+      const freshToken = auth.currentUser
+        ? await auth.currentUser.getIdToken(true)
+        : token;
+      console.log('[SidePanel] Token refreshed before API calls');
+
       const headers = {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${freshToken}`,
       };
 
       let productId: number;
