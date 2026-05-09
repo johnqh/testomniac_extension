@@ -310,14 +310,14 @@ async function startScan(
         LOG(
           `[event] testSurfaceCreated: surfaceId=${surface.surfaceId} title=${surface.title}`
         );
-        scanState.phase = 'testing';
+        scanState.phase = 'scanning';
         addEvent('test_surface_created', surface.title);
       },
       onTestElementRunCompleted(run) {
         LOG(
           `[event] testElementRunCompleted: testElementRunId=${run.testElementRunId} passed=${run.passed}`
         );
-        scanState.phase = 'testing';
+        scanState.phase = 'scanning';
         addEvent(
           run.passed ? 'test_element_passed' : 'test_element_failed',
           `Test case run ${run.testElementRunId}`

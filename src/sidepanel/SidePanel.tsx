@@ -5,6 +5,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
+import FlipNumbers from 'react-flip-numbers';
 import { LoginPage } from '@sudobility/building_blocks';
 import { Combobox, Input } from '@sudobility/components';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
@@ -177,6 +178,14 @@ interface RunStructureData {
   }>;
 }
 
+interface RunPageSummary {
+  pageId: number;
+  relativePath: string;
+  pageStatesCount: number;
+  testElementRunsCount: number;
+  errors: number;
+}
+
 const initialProgress: ScanProgress = {
   scanId: null,
   phase: 'idle',
@@ -203,6 +212,15 @@ const EXPERTISE_OPTIONS: ExpertiseOption[] = [
   { slug: 'ui', label: 'UI' },
   { slug: 'accessibility', label: 'Accessibility' },
 ];
+
+const PHASE_ORDER: Record<string, number> = {
+  idle: 0,
+  scanning: 1,
+  testing: 2,
+  completed: 3,
+  failed: 3,
+  stopped: 3,
+};
 
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
@@ -235,6 +253,42 @@ export function SidePanel() {
   const [selectedExpertiseSlugs, setSelectedExpertiseSlugs] = useState<
     string[]
   >(['tester']);
+
+  const mergeProgress = useCallback(
+    (prev: ScanProgress, next: ScanProgress): ScanProgress => {
+      const isFreshRun =
+        prev.scanId == null ||
+        next.scanId == null ||
+        prev.scanId !== next.scanId ||
+        prev.phase === 'idle' ||
+        next.phase === 'idle';
+
+      if (isFreshRun || next.isComplete) {
+        return next;
+      }
+
+      const prevPhaseRank = PHASE_ORDER[prev.phase] ?? 0;
+      const nextPhaseRank = PHASE_ORDER[next.phase] ?? 0;
+      const mergedPhase =
+        nextPhaseRank >= prevPhaseRank ? next.phase : prev.phase;
+
+      return {
+        ...prev,
+        ...next,
+        phase: mergedPhase,
+        pagesFound: Math.max(prev.pagesFound, next.pagesFound),
+        pageStatesFound: Math.max(prev.pageStatesFound, next.pageStatesFound),
+        testRunsCompleted: Math.max(
+          prev.testRunsCompleted,
+          next.testRunsCompleted
+        ),
+        findingsFound: Math.max(prev.findingsFound, next.findingsFound),
+        events:
+          next.events.length >= prev.events.length ? next.events : prev.events,
+      };
+    },
+    []
+  );
 
   // Fetch entities when authenticated
   useEffect(() => {
@@ -547,7 +601,7 @@ export function SidePanel() {
       .then(response => {
         const data = response?.data as ScanProgress | undefined;
         if (!data) return;
-        setProgress(data);
+        setProgress(prev => mergeProgress(prev, data));
         if (data.isRunning) {
           setIsScanning(true);
         } else if (data.isComplete) {
@@ -558,7 +612,7 @@ export function SidePanel() {
 
     const listener = (message: { type: string; data?: ScanProgress }) => {
       if (message.type === 'SCAN_PROGRESS' && message.data) {
-        setProgress(message.data);
+        setProgress(prev => mergeProgress(prev, message.data as ScanProgress));
         if (message.data.isComplete) {
           setIsScanning(false);
         }
@@ -572,63 +626,116 @@ export function SidePanel() {
     };
     chrome.runtime.onMessage.addListener(listener);
     return () => chrome.runtime.onMessage.removeListener(listener);
-  }, []);
+  }, [mergeProgress]);
 
   useEffect(() => {
     if (!token || !progress.scanId) return;
-    if (!progress.isComplete && progress.phase !== 'completed') return;
-
     let cancelled = false;
 
-    Promise.all([
-      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then(response => response.json()),
-      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/navigation-map`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then(response => response.json()),
-      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/structure`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }).then(response => response.json()),
-    ])
-      .then(([summaryData, mapData, structureData]) => {
-        if (cancelled) return;
+    const fetchLiveData = () =>
+      Promise.all([
+        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(response => response.json()),
+        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/pages-summary`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(response => response.json()),
+        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/navigation-map`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(response => response.json()),
+        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/structure`, {
+          headers: { Authorization: `Bearer ${token}` },
+        }).then(response => response.json()),
+      ])
+        .then(([summaryData, pagesData, mapData, structureData]) => {
+          if (cancelled) return;
 
-        if (summaryData?.success && summaryData.data) {
-          const summary = summaryData.data as RunSummary;
-          setRunSummary(summary);
-          setProgress(prev => ({
-            ...prev,
-            aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
-            expertiseSummary:
-              Object.keys(summary.expertiseSummary ?? {}).length > 0
-                ? Object.fromEntries(
-                    Object.entries(summary.expertiseSummary).map(
-                      ([name, counts]) => [
-                        name,
-                        {
-                          warnings: counts.warnings,
-                          errors: counts.errors,
-                        },
-                      ]
+          if (summaryData?.success && summaryData.data) {
+            const summary = summaryData.data as RunSummary;
+            setRunSummary(summary);
+            setProgress(prev => ({
+              ...prev,
+              pagesFound: Math.max(
+                prev.pagesFound,
+                summary.pagesFound ?? initialProgress.pagesFound
+              ),
+              pageStatesFound: Math.max(
+                prev.pageStatesFound,
+                summary.pageStatesFound ?? initialProgress.pageStatesFound
+              ),
+              testRunsCompleted: Math.max(
+                prev.testRunsCompleted,
+                summary.testRunsCompleted ?? initialProgress.testRunsCompleted
+              ),
+              aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+              expertiseSummary:
+                Object.keys(summary.expertiseSummary ?? {}).length > 0
+                  ? Object.fromEntries(
+                      Object.entries(summary.expertiseSummary).map(
+                        ([name, counts]) => [
+                          name,
+                          {
+                            warnings: counts.warnings,
+                            errors: counts.errors,
+                          },
+                        ]
+                      )
                     )
-                  )
-                : (prev.expertiseSummary ?? null),
-          }));
-        }
+                  : (prev.expertiseSummary ?? null),
+            }));
+          }
 
-        if (mapData?.success && mapData.data) {
-          setNavigationMap(mapData.data as NavigationMapData);
-        }
+          if (pagesData?.success && Array.isArray(pagesData.data)) {
+            const pages = pagesData.data as RunPageSummary[];
+            setProgress(prev => ({
+              ...prev,
+              pagesFound: Math.max(prev.pagesFound, pages.length),
+              pageStatesFound: Math.max(
+                prev.pageStatesFound,
+                pages.reduce(
+                  (total, page) => total + (page.pageStatesCount ?? 0),
+                  0
+                )
+              ),
+              testRunsCompleted: Math.max(
+                prev.testRunsCompleted,
+                pages.reduce(
+                  (total, page) => total + (page.testElementRunsCount ?? 0),
+                  0
+                )
+              ),
+              findingsFound: Math.max(
+                prev.findingsFound,
+                pages.reduce((total, page) => total + (page.errors ?? 0), 0)
+              ),
+            }));
+          }
 
-        if (structureData?.success && structureData.data) {
-          setRunStructure(structureData.data as RunStructureData);
-        }
-      })
-      .catch(() => {});
+          if (mapData?.success && mapData.data) {
+            setNavigationMap(mapData.data as NavigationMapData);
+          }
+
+          if (structureData?.success && structureData.data) {
+            setRunStructure(structureData.data as RunStructureData);
+          }
+        })
+        .catch(() => {});
+
+    void fetchLiveData();
+
+    if (progress.isComplete || progress.phase === 'completed') {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchLiveData();
+    }, 2000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(intervalId);
     };
   }, [token, progress.scanId, progress.isComplete, progress.phase]);
 
@@ -639,7 +746,6 @@ export function SidePanel() {
 
   const phases = [
     { key: 'scanning', label: 'Scanning' },
-    { key: 'testing', label: 'Testing' },
     { key: 'completed', label: 'Complete' },
   ];
 
@@ -649,36 +755,40 @@ export function SidePanel() {
   )
     .filter(([, counts]) => counts.errors > 0)
     .sort(([left], [right]) => left.localeCompare(right));
-  const errorCount =
+  const summaryErrorCount =
     runSummary != null
       ? Object.values(runSummary.expertiseSummary ?? {}).reduce(
           (total, counts) => total + counts.errors,
           0
         )
-      : progress.findingsFound;
+      : 0;
+  const eventFindingRows = progress.events
+    .filter(event => event.type === 'finding')
+    .map((event, index) => ({
+      key: `${event.timestamp}-${index}`,
+      timestamp: event.timestamp,
+      badge: 'error',
+      message: event.message,
+      description: '',
+    }));
+  const summaryFindingRows = runSummary?.recentFindings
+    ?.filter(finding => finding.type === 'error')
+    .map(finding => ({
+      key: String(finding.id),
+      timestamp: finding.createdAt
+        ? new Date(finding.createdAt).getTime()
+        : Date.now(),
+      badge: finding.type,
+      message: finding.expertise
+        ? `[${finding.expertise}] ${finding.title}`
+        : finding.title,
+      description: finding.description,
+    }));
+  const errorCount = Math.max(summaryErrorCount, progress.findingsFound);
   const findingRows =
-    runSummary?.recentFindings
-      .filter(finding => finding.type === 'error')
-      .map(finding => ({
-        key: String(finding.id),
-        timestamp: finding.createdAt
-          ? new Date(finding.createdAt).getTime()
-          : Date.now(),
-        badge: finding.type,
-        message: finding.expertise
-          ? `[${finding.expertise}] ${finding.title}`
-          : finding.title,
-        description: finding.description,
-      })) ??
-    progress.events
-      .filter(e => e.type === 'finding')
-      .map((event, index) => ({
-        key: `${event.timestamp}-${index}`,
-        timestamp: event.timestamp,
-        badge: 'error',
-        message: event.message,
-        description: '',
-      }));
+    summaryFindingRows && summaryFindingRows.length > 0
+      ? summaryFindingRows
+      : eventFindingRows;
 
   if (loading) {
     return (
@@ -992,8 +1102,24 @@ export function SidePanel() {
                   : 'hover:bg-gray-50'
               }`}
             >
-              <div className={`text-lg font-bold tabular-nums ${c.color}`}>
-                {c.value}
+              <div className={`text-lg font-bold ${c.color}`}>
+                <div className='flex items-center justify-center font-mono tabular-nums'>
+                  <FlipNumbers
+                    key={`${c.key}-${c.value}`}
+                    height={18}
+                    width={12}
+                    color='currentColor'
+                    background='transparent'
+                    numbers={String(c.value)}
+                    play
+                    perspective={120}
+                    duration={0.35}
+                    numberStyle={{
+                      fontSize: '1.125rem',
+                      fontWeight: 700,
+                    }}
+                  />
+                </div>
               </div>
               <div className='text-[10px] text-gray-500'>{c.label}</div>
             </button>
