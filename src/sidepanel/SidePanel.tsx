@@ -1108,8 +1108,9 @@ export function SidePanel() {
                     <div className='flex items-center justify-between gap-2'>
                       <span className='text-gray-800'>{surface.title}</span>
                       <span className='text-green-600'>
-                        {surface.surfaceRuns.map(run => run.status).join(', ') ||
-                          'pending'}
+                        {surface.surfaceRuns
+                          .map(run => run.status)
+                          .join(', ') || 'pending'}
                       </span>
                     </div>
                     <div className='text-gray-500'>
@@ -1123,7 +1124,9 @@ export function SidePanel() {
                       className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
                     >
                       <div className='flex items-center justify-between gap-2'>
-                        <span className='text-gray-700'>{testElement.title}</span>
+                        <span className='text-gray-700'>
+                          {testElement.title}
+                        </span>
                         <span className='text-gray-500'>
                           {testElement.testType}
                         </span>
