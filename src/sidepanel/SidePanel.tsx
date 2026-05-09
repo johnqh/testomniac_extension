@@ -132,32 +132,32 @@ interface RunStructureData {
   };
   bundleRun: {
     id: number;
-    testSuiteBundleId: number;
+    testSurfaceBundleId: number;
     status: string;
     startedAt: string | null;
     completedAt: string | null;
     createdAt: string | null;
   };
-  suites: Array<{
+  surfaces: Array<{
     id: number;
     title: string;
     priority: number;
-    suiteTags: string[];
-    suiteRuns: Array<{
+    surfaceTags: string[];
+    surfaceRuns: Array<{
       id: number;
       status: string;
       startedAt: string | null;
       completedAt: string | null;
     }>;
-    testCases: Array<{
+    testElements: Array<{
       id: number;
       title: string;
       testType: string;
       priority: number;
-      dependencyTestCaseId: number | null;
+      dependencyTestElementId: number | null;
       startingPath: string | null;
       startingPageStateId: number | null;
-      caseRuns: Array<{
+      elementRuns: Array<{
         id: number;
         status: string;
         durationMs: number | null;
@@ -1099,49 +1099,49 @@ export function SidePanel() {
                   </div>
                 </div>
               )}
-              {(runStructure?.suites ?? []).map(suite => (
+              {(runStructure?.surfaces ?? []).map(surface => (
                 <div
-                  key={suite.id}
+                  key={surface.id}
                   className='border-b border-gray-100 last:border-0'
                 >
                   <div className='px-2 py-1 bg-white border-b border-gray-100'>
                     <div className='flex items-center justify-between gap-2'>
-                      <span className='text-gray-800'>{suite.title}</span>
+                      <span className='text-gray-800'>{surface.title}</span>
                       <span className='text-green-600'>
-                        {suite.suiteRuns.map(run => run.status).join(', ') ||
+                        {surface.surfaceRuns.map(run => run.status).join(', ') ||
                           'pending'}
                       </span>
                     </div>
                     <div className='text-gray-500'>
-                      {suite.testCases.length} case
-                      {suite.testCases.length === 1 ? '' : 's'}
+                      {surface.testElements.length} element
+                      {surface.testElements.length === 1 ? '' : 's'}
                     </div>
                   </div>
-                  {suite.testCases.map(testCase => (
+                  {surface.testElements.map(testElement => (
                     <div
-                      key={testCase.id}
+                      key={testElement.id}
                       className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
                     >
                       <div className='flex items-center justify-between gap-2'>
-                        <span className='text-gray-700'>{testCase.title}</span>
+                        <span className='text-gray-700'>{testElement.title}</span>
                         <span className='text-gray-500'>
-                          {testCase.testType}
+                          {testElement.testType}
                         </span>
                       </div>
                       <div className='text-gray-500'>
-                        start {testCase.startingPath || '/'}
-                        {testCase.dependencyTestCaseId
-                          ? ` · depends on #${testCase.dependencyTestCaseId}`
+                        start {testElement.startingPath || '/'}
+                        {testElement.dependencyTestElementId
+                          ? ` · depends on #${testElement.dependencyTestElementId}`
                           : ''}
                       </div>
-                      {testCase.caseRuns.map(caseRun => (
-                        <div key={caseRun.id} className='mt-1 text-gray-600'>
-                          run {caseRun.id} · {caseRun.status}
-                          {caseRun.durationMs != null
-                            ? ` · ${caseRun.durationMs}ms`
+                      {testElement.elementRuns.map(elementRun => (
+                        <div key={elementRun.id} className='mt-1 text-gray-600'>
+                          run {elementRun.id} · {elementRun.status}
+                          {elementRun.durationMs != null
+                            ? ` · ${elementRun.durationMs}ms`
                             : ''}
-                          {caseRun.findings.length > 0
-                            ? ` · ${caseRun.findings.length} finding${caseRun.findings.length === 1 ? '' : 's'}`
+                          {elementRun.findings.length > 0
+                            ? ` · ${elementRun.findings.length} finding${elementRun.findings.length === 1 ? '' : 's'}`
                             : ''}
                         </div>
                       ))}
@@ -1149,7 +1149,7 @@ export function SidePanel() {
                   ))}
                 </div>
               ))}
-              {(runStructure?.suites.length ?? 0) === 0 && (
+              {(runStructure?.surfaces.length ?? 0) === 0 && (
                 <div className='p-3 text-center text-gray-400'>
                   No coverage tree yet
                 </div>

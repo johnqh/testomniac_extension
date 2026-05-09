@@ -274,21 +274,21 @@ async function startScan(
         scanState.phase = 'scanning';
         addEvent('state_captured', 'Page state captured');
       },
-      onTestSuiteCreated(suite) {
+      onTestSurfaceCreated(surface) {
         LOG(
-          `[event] testSuiteCreated: suiteId=${suite.suiteId} title=${suite.title}`
+          `[event] testSurfaceCreated: surfaceId=${surface.surfaceId} title=${surface.title}`
         );
         scanState.phase = 'testing';
-        addEvent('test_suite_created', suite.title);
+        addEvent('test_surface_created', surface.title);
       },
-      onTestCaseRunCompleted(run) {
+      onTestElementRunCompleted(run) {
         LOG(
-          `[event] testCaseRunCompleted: testCaseRunId=${run.testCaseRunId} passed=${run.passed}`
+          `[event] testElementRunCompleted: testElementRunId=${run.testElementRunId} passed=${run.passed}`
         );
         scanState.phase = 'testing';
         addEvent(
-          run.passed ? 'test_case_passed' : 'test_case_failed',
-          `Test case run ${run.testCaseRunId}`
+          run.passed ? 'test_element_passed' : 'test_element_failed',
+          `Test case run ${run.testElementRunId}`
         );
       },
       onTestRunCompleted(run) {
