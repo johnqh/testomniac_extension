@@ -12,10 +12,16 @@ The extension is the interactive entry point for URL scanning:
 
 1. The side panel authenticates the user with Firebase
 2. The user selects workspace, product, and environment label
-3. The extension asks `testomniac_api` to create a discovery run from the URL
+3. The extension asks `testomniac_api` to bootstrap a discovery run from the
+   URL through `POST /api/v1/scan`
 4. The background worker creates a `ChromeAdapter`
 5. The shared runner service scans pages and generates coverage
 6. Progress and results stream back into the side panel
+
+`POST /api/v1/scan` is intentionally kept as the simple public entrypoint for
+"scan this URL". It is only a bootstrap route. Internally it creates the root
+discovery run and related records, and the actual execution continues through
+the normal run loop.
 
 ## Architecture
 

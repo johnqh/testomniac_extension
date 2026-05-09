@@ -10,8 +10,13 @@ import { ChromeAdapter } from '../adapters/ChromeAdapter';
 import {
   ApiClient,
   runTestRun,
-  createDefaultExpertises,
   type ScanEventHandler,
+  type Expertise,
+  TesterExpertise,
+  SeoExpertise,
+  SecurityExpertise,
+  PerformanceExpertise,
+  NoopExpertise,
 } from '@sudobility/testomniac_runner_service';
 
 const LOG = (...args: unknown[]) => console.log('[Testomniac]', ...args);
@@ -24,6 +29,33 @@ const DEFAULT_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 const DEFAULT_API_KEY = import.meta.env.VITE_SCANNER_API_KEY || '';
 let apiUrl = DEFAULT_API_URL;
 let apiKey = DEFAULT_API_KEY;
+const REQUIRED_EXPERTISE_SLUG = 'tester';
+
+function createExpertises(slugs?: string[] | null): Expertise[] {
+  const registry: Record<string, () => Expertise> = {
+    tester: () => new TesterExpertise(),
+    seo: () => new SeoExpertise(),
+    security: () => new SecurityExpertise(),
+    performance: () => new PerformanceExpertise(),
+    content: () => new NoopExpertise('content'),
+    ui: () => new NoopExpertise('ui'),
+    accessibility: () => new NoopExpertise('accessibility'),
+  };
+  const normalized = Array.from(
+    new Set(
+      (slugs ?? [REQUIRED_EXPERTISE_SLUG])
+        .map(slug => slug.trim().toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  const selected = normalized.includes(REQUIRED_EXPERTISE_SLUG)
+    ? normalized
+    : [REQUIRED_EXPERTISE_SLUG, ...normalized];
+
+  return selected
+    .map(slug => registry[slug]?.())
+    .filter((expertise): expertise is Expertise => Boolean(expertise));
+}
 
 interface ScanState {
   isRunning: boolean;
@@ -302,7 +334,10 @@ async function startScan(
       },
       onFindingCreated(finding) {
         LOG(`[event] findingCreated: ${finding.type}: ${finding.title}`);
-        addEvent('finding', `${finding.type}: ${finding.title}`);
+        if (finding.type === 'error') {
+          scanState.findingsFound += 1;
+          addEvent('finding', `${finding.type}: ${finding.title}`);
+        }
       },
       onStatsUpdated(stats) {
         LOG(
@@ -311,7 +346,6 @@ async function startScan(
         scanState.pagesFound = stats.pagesFound;
         scanState.pageStatesFound = stats.pageStatesFound;
         scanState.testRunsCompleted = stats.testRunsCompleted;
-        scanState.findingsFound = stats.findingsFound;
         sendProgressToSidePanel();
       },
       onScreenshotCaptured(data) {
@@ -341,9 +375,12 @@ async function startScan(
     };
 
     // Call the shared orchestrator
-    const expertises = createDefaultExpertises();
+    const runExpertiseSlugs =
+      (run as { expertiseSlugsJson?: string[] | null }).expertiseSlugsJson ??
+      undefined;
+    const expertises = createExpertises(runExpertiseSlugs);
     LOG(
-      `Calling runTestRun(adapter, {testRunId=${runId}, runnerId=${runnerId}, baseUrl=${new URL(url).origin}}, api, expertises, eventHandler)`
+      `Calling runTestRun(adapter, {testRunId=${runId}, runnerId=${runnerId}, baseUrl=${new URL(url).origin}}, api, expertises=${expertises.map(expertise => expertise.name).join(',')}, eventHandler)`
     );
     const result = await runTestRun(
       adapter,

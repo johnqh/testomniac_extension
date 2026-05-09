@@ -31,6 +31,11 @@ logic live in `@sudobility/testomniac_runner_service`.
 6. Progress is bridged back into the side panel through `SCAN_PROGRESS`
    messages and run-read endpoints.
 
+`POST /api/v1/scan` is kept on purpose as the simple URL bootstrap endpoint.
+It does not represent a separate execution path. Its only job is to create the
+initial discovery run records so the standard `runTestRun()` loop can take
+over.
+
 ## Local Responsibilities
 
 - Chrome-specific browser automation via

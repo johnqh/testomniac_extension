@@ -29,6 +29,12 @@ interface ProductOption {
   entityId: string | null;
 }
 
+interface ExpertiseOption {
+  slug: string;
+  label: string;
+  required?: boolean;
+}
+
 interface ResolveEnvironmentApiResponse {
   testEnvironmentId: number;
   kind: 'local' | 'shared';
@@ -188,6 +194,16 @@ const initialProgress: ScanProgress = {
 
 type ResultTab = 'overview' | 'map' | 'coverage' | 'issues' | 'events';
 
+const EXPERTISE_OPTIONS: ExpertiseOption[] = [
+  { slug: 'tester', label: 'Tester', required: true },
+  { slug: 'seo', label: 'SEO' },
+  { slug: 'security', label: 'Security' },
+  { slug: 'performance', label: 'Performance' },
+  { slug: 'content', label: 'Content' },
+  { slug: 'ui', label: 'UI' },
+  { slug: 'accessibility', label: 'Accessibility' },
+];
+
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
@@ -216,6 +232,9 @@ export function SidePanel() {
   const [selectedEnvironment, setSelectedEnvironment] =
     useState<EnvironmentChoice>('production');
   const [customEnvironmentLabel, setCustomEnvironmentLabel] = useState('');
+  const [selectedExpertiseSlugs, setSelectedExpertiseSlugs] = useState<
+    string[]
+  >(['tester']);
 
   // Fetch entities when authenticated
   useEffect(() => {
@@ -451,6 +470,7 @@ export function SidePanel() {
           url: activeTabUrl,
           productId,
           testEnvironmentId: resolvedEnvironment.testEnvironmentId,
+          expertiseSlugs: selectedExpertiseSlugs,
           createdByUserId: user?.uid,
           ownedByUserId: user?.uid,
           environmentLabel: resolvedEnvironmentLabel,
@@ -507,6 +527,7 @@ export function SidePanel() {
     selectedProductId,
     selectedEnvironment,
     resolvedEnvironmentLabel,
+    selectedExpertiseSlugs,
     isLocalEnvironment,
     isEnvironmentSelectionValid,
     user?.uid,
@@ -625,25 +646,36 @@ export function SidePanel() {
   const currentPhaseIndex = phases.findIndex(p => p.key === progress.phase);
   const expertiseSummaryEntries = Object.entries(
     progress.expertiseSummary ?? {}
-  ).sort(([left], [right]) => left.localeCompare(right));
+  )
+    .filter(([, counts]) => counts.errors > 0)
+    .sort(([left], [right]) => left.localeCompare(right));
+  const errorCount =
+    runSummary != null
+      ? Object.values(runSummary.expertiseSummary ?? {}).reduce(
+          (total, counts) => total + counts.errors,
+          0
+        )
+      : progress.findingsFound;
   const findingRows =
-    runSummary?.recentFindings.map(finding => ({
-      key: String(finding.id),
-      timestamp: finding.createdAt
-        ? new Date(finding.createdAt).getTime()
-        : Date.now(),
-      badge: finding.type,
-      message: finding.expertise
-        ? `[${finding.expertise}] ${finding.title}`
-        : finding.title,
-      description: finding.description,
-    })) ??
+    runSummary?.recentFindings
+      .filter(finding => finding.type === 'error')
+      .map(finding => ({
+        key: String(finding.id),
+        timestamp: finding.createdAt
+          ? new Date(finding.createdAt).getTime()
+          : Date.now(),
+        badge: finding.type,
+        message: finding.expertise
+          ? `[${finding.expertise}] ${finding.title}`
+          : finding.title,
+        description: finding.description,
+      })) ??
     progress.events
       .filter(e => e.type === 'finding')
       .map((event, index) => ({
         key: `${event.timestamp}-${index}`,
         timestamp: event.timestamp,
-        badge: 'finding',
+        badge: 'error',
         message: event.message,
         description: '',
       }));
@@ -751,44 +783,85 @@ export function SidePanel() {
           </div>
 
           {activeTabUrl && (
-            <div>
-              <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-                Environment
-              </label>
-              {isLocalEnvironment ? (
-                <div className='rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>
-                  Local environment for {user?.email || 'current user'} on{' '}
-                  {activeHostname}
-                </div>
-              ) : (
-                <div className='space-y-2'>
-                  <Combobox
-                    options={environmentOptions}
-                    value={selectedEnvironment}
-                    onChange={value =>
-                      setSelectedEnvironment(value as EnvironmentChoice)
-                    }
-                    placeholder='Select environment'
-                    emptyMessage='No environments found'
-                    className='w-full'
-                  />
-                  {selectedEnvironment === 'custom' && (
-                    <Input
-                      value={customEnvironmentLabel}
-                      onChange={e => setCustomEnvironmentLabel(e.target.value)}
-                      placeholder='Enter environment label'
-                    />
-                  )}
-                  <div className='text-[10px] text-gray-500'>
-                    Scans for {activeHostname} will be stored under{' '}
-                    <span className='font-medium text-gray-700'>
-                      {resolvedEnvironmentLabel || 'an environment label'}
-                    </span>
-                    .
+            <>
+              <div>
+                <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                  Environment
+                </label>
+                {isLocalEnvironment ? (
+                  <div className='rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>
+                    Local environment for {user?.email || 'current user'} on{' '}
+                    {activeHostname}
                   </div>
+                ) : (
+                  <div className='space-y-2'>
+                    <Combobox
+                      options={environmentOptions}
+                      value={selectedEnvironment}
+                      onChange={value =>
+                        setSelectedEnvironment(value as EnvironmentChoice)
+                      }
+                      placeholder='Select environment'
+                      emptyMessage='No environments found'
+                      className='w-full'
+                    />
+                    {selectedEnvironment === 'custom' && (
+                      <Input
+                        value={customEnvironmentLabel}
+                        onChange={e =>
+                          setCustomEnvironmentLabel(e.target.value)
+                        }
+                        placeholder='Enter environment label'
+                      />
+                    )}
+                    <div className='text-[10px] text-gray-500'>
+                      Scans for {activeHostname} will be stored under{' '}
+                      <span className='font-medium text-gray-700'>
+                        {resolvedEnvironmentLabel || 'an environment label'}
+                      </span>
+                      .
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className='block text-[11px] font-medium text-gray-500 mb-1'>
+                  Expertises
+                </label>
+                <div className='rounded-md border border-gray-200 bg-gray-50 px-2 py-2 space-y-1.5'>
+                  {EXPERTISE_OPTIONS.map(option => {
+                    const checked = selectedExpertiseSlugs.includes(
+                      option.slug
+                    );
+                    return (
+                      <label
+                        key={option.slug}
+                        className='flex items-center justify-between gap-2 text-[11px] text-gray-700'
+                      >
+                        <span>
+                          {option.label}
+                          {option.required ? ' (required)' : ''}
+                        </span>
+                        <input
+                          type='checkbox'
+                          checked={checked}
+                          disabled={option.required}
+                          onChange={event => {
+                            if (option.required) return;
+                            setSelectedExpertiseSlugs(prev =>
+                              event.target.checked
+                                ? [...prev, option.slug]
+                                : prev.filter(slug => slug !== option.slug)
+                            );
+                          }}
+                        />
+                      </label>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
+              </div>
+            </>
           )}
         </div>
       )}
@@ -903,8 +976,8 @@ export function SidePanel() {
               },
               {
                 key: 'issues',
-                label: 'Findings',
-                value: progress.findingsFound,
+                label: 'Errors',
+                value: errorCount,
                 color: 'text-red-600',
                 ring: 'ring-red-300',
               },
@@ -935,7 +1008,7 @@ export function SidePanel() {
             [
               { key: 'overview', label: 'Overview' },
               { key: 'map', label: 'Navigation' },
-              { key: 'issues', label: 'Findings' },
+              { key: 'issues', label: 'Errors' },
               { key: 'coverage', label: 'Coverage' },
               { key: 'events', label: 'All Events' },
             ] as const
@@ -977,14 +1050,10 @@ export function SidePanel() {
                           <div className='text-[10px] font-medium uppercase tracking-wide text-gray-500'>
                             {name}
                           </div>
-                          <div className='mt-1 flex gap-2 text-[11px]'>
+                          <div className='mt-1 text-[11px]'>
                             <span className='text-red-600'>
                               {counts.errors} error
                               {counts.errors === 1 ? '' : 's'}
-                            </span>
-                            <span className='text-amber-600'>
-                              {counts.warnings} warning
-                              {counts.warnings === 1 ? '' : 's'}
                             </span>
                           </div>
                         </div>
@@ -1077,7 +1146,7 @@ export function SidePanel() {
               ))}
               {findingRows.length === 0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No findings yet
+                  No errors yet
                 </div>
               )}
             </div>
@@ -1139,13 +1208,22 @@ export function SidePanel() {
                       </div>
                       {testElement.elementRuns.map(elementRun => (
                         <div key={elementRun.id} className='mt-1 text-gray-600'>
-                          run {elementRun.id} · {elementRun.status}
-                          {elementRun.durationMs != null
-                            ? ` · ${elementRun.durationMs}ms`
-                            : ''}
-                          {elementRun.findings.length > 0
-                            ? ` · ${elementRun.findings.length} finding${elementRun.findings.length === 1 ? '' : 's'}`
-                            : ''}
+                          {(() => {
+                            const errorFindings = elementRun.findings.filter(
+                              finding => finding.type === 'error'
+                            );
+                            return (
+                              <>
+                                run {elementRun.id} · {elementRun.status}
+                                {elementRun.durationMs != null
+                                  ? ` · ${elementRun.durationMs}ms`
+                                  : ''}
+                                {errorFindings.length > 0
+                                  ? ` · ${errorFindings.length} error${errorFindings.length === 1 ? '' : 's'}`
+                                  : ''}
+                              </>
+                            );
+                          })()}
                         </div>
                       ))}
                     </div>
