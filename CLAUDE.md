@@ -22,7 +22,7 @@ logic live in `@sudobility/testomniac_runner_service`.
    current URL, workspace, product, and environment.
 2. The side panel calls `POST /api/v1/test-environments/resolve` and then
    `POST /api/v1/scan`.
-3. The API creates the discovery bundle, root suite run, root case run, and
+3. The API creates the discovery bundle, root surface run, root element run, and
    root `test_run`.
 4. The side panel sends `START_SCAN` to
    [`src/background/index.ts`](src/background/index.ts).
@@ -40,7 +40,7 @@ logic live in `@sudobility/testomniac_runner_service`.
 - background-to-side-panel message bridge
 - result presentation for:
   - navigation map
-  - suite bundle / suite / case / case-run coverage
+  - surface bundle / surface / element / element-run coverage
   - findings
   - raw event stream
 
