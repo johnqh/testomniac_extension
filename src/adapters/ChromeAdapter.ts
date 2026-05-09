@@ -13,6 +13,13 @@ export class ChromeAdapter implements BrowserAdapter {
   private consoleHandlers = new Set<(...args: unknown[]) => void>();
   private responseHandlers = new Set<(...args: unknown[]) => void>();
   private requestMetadata = new Map<string, { method: string; url: string }>();
+  private consoleLogBuffer: string[] = [];
+  private networkLogBuffer: Array<{
+    method: string;
+    url: string;
+    status: number;
+    contentType: string;
+  }> = [];
 
   constructor(tabId: number) {
     this.tabId = tabId;
@@ -423,13 +430,32 @@ export class ChromeAdapter implements BrowserAdapter {
   on(
     event: 'console' | 'response',
     handler: (...args: unknown[]) => void
-  ): void {
+  ): () => void {
     if (event === 'console') {
       this.consoleHandlers.add(handler);
-    } else {
-      this.responseHandlers.add(handler);
+      void this.ensureDebugger();
+      return () => {
+        this.consoleHandlers.delete(handler);
+      };
     }
+
+    this.responseHandlers.add(handler);
     void this.ensureDebugger();
+    return () => {
+      this.responseHandlers.delete(handler);
+    };
+  }
+
+  getRuntimeArtifacts() {
+    return {
+      consoleLogs: [...this.consoleLogBuffer],
+      networkLogs: [...this.networkLogBuffer],
+    };
+  }
+
+  resetRuntimeArtifacts(): void {
+    this.consoleLogBuffer = [];
+    this.networkLogBuffer = [];
   }
 
   // --- Private helpers ---
@@ -477,6 +503,7 @@ export class ChromeAdapter implements BrowserAdapter {
           .join(': ')
           .trim();
         if (message) {
+          this.consoleLogBuffer.push(message);
           for (const handler of this.consoleHandlers) {
             handler(message);
           }
@@ -496,8 +523,10 @@ export class ChromeAdapter implements BrowserAdapter {
         if (text) {
           const prefix = payload.entry?.level ? `${payload.entry.level}: ` : '';
           const suffix = payload.entry?.url ? ` (${payload.entry.url})` : '';
+          const message = `${prefix}${text}${suffix}`;
+          this.consoleLogBuffer.push(message);
           for (const handler of this.consoleHandlers) {
-            handler(`${prefix}${text}${suffix}`);
+            handler(message);
           }
         }
         return;
@@ -539,6 +568,7 @@ export class ChromeAdapter implements BrowserAdapter {
           status: payload.response.status || 0,
           contentType: payload.response.mimeType || '',
         };
+        this.networkLogBuffer.push(entry);
         for (const handler of this.responseHandlers) {
           handler(entry);
         }
