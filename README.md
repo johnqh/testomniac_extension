@@ -1,52 +1,81 @@
 # testomniac_extension
 
-AI-powered automated UI testing Chrome extension (Manifest V3). Navigates websites autonomously, interacts with elements via Chrome DevTools Protocol, and uses AI to validate page behavior.
+Chrome extension for Testomniac. It lets a signed-in user pick a workspace and
+product, start a scan from the current tab URL, and watch coverage/findings as
+the scan runs.
 
-## Setup
+The extension is built with `React`, `Vite`, and Chrome Manifest V3 APIs.
 
-```bash
-bun install
-bun run dev          # Build with hot reload
-```
+## What It Does
 
-Load in Chrome: go to `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select the `dist/` folder.
+The extension is the interactive entry point for URL scanning:
 
-## How It Works
-
-1. User enters a target URL in the popup and clicks Start
-2. Extension creates a new tab and navigates to the URL
-3. Content script extracts interactive elements (links, buttons, inputs) with coordinate data
-4. AI endpoint (`POST /pick-element`) selects which element to interact with
-5. Element is clicked via Chrome DevTools Protocol (real mouse events)
-6. Screenshot is captured via CDP
-7. AI endpoint (`POST /validate-page`) validates the navigation result
-8. Loop repeats from step 3
+1. The side panel authenticates the user with Firebase
+2. The user selects workspace, product, and environment label
+3. The extension asks `testomniac_api` to create a discovery run from the URL
+4. The background worker creates a `ChromeAdapter`
+5. The shared runner service scans pages and generates coverage
+6. Progress and results stream back into the side panel
 
 ## Architecture
 
-- **Background** (`src/background/`) -- Service worker orchestrating the test loop (~750 lines)
-- **Content** (`src/content/`) -- Element extraction with hard limits (30 links, 40 buttons, 50 inputs)
-- **Popup** (`src/popup/`) -- React UI with URL input, start/stop controls, and live logs
-- **Shared** (`src/shared/`) -- Message types and network guard (fetch/XHR monkey-patch)
+- [src/sidepanel/SidePanel.tsx](/Users/johnhuang/projects/testomniac_extension/src/sidepanel/SidePanel.tsx)
+  Main UI for auth, environment selection, scan start, and results
+- [src/background/index.ts](/Users/johnhuang/projects/testomniac_extension/src/background/index.ts)
+  Background service worker that starts and monitors scans
+- [src/adapters/ChromeAdapter.ts](/Users/johnhuang/projects/testomniac_extension/src/adapters/ChromeAdapter.ts)
+  BrowserAdapter implementation backed by `chrome.tabs`, `chrome.scripting`,
+  and `chrome.debugger`
+- [src/shared/environment.ts](/Users/johnhuang/projects/testomniac_extension/src/shared/environment.ts)
+  Local vs shared environment resolution
 
 ## Development
 
 ```bash
-bun run dev          # Vite dev server (hot reload)
-bun run build        # TypeScript check + Vite build
-bun run type-check   # TypeScript only
+bun install
+bun run dev
 ```
 
-## Chrome Permissions
+Build and validation:
 
-`activeTab`, `scripting`, `tabs`, `storage`, `debugger`
+```bash
+bun run build
+bun run type-check
+bun run lint
+```
 
-## Related Packages
+## Load In Chrome
 
-- `testomniac_types` -- Shared type definitions (via file: link)
-- `testomniac_lib` -- Business logic (via file: link, minimal usage)
-- `testomniac_api` -- Backend API server (called directly via fetch)
+1. Run `bun run build`
+2. Open `chrome://extensions`
+3. Enable Developer Mode
+4. Click `Load unpacked`
+5. Select the generated `dist/` directory
 
-## License
+## Required Runtime Config
 
-BUSL-1.1
+The extension reads these values from Vite env or saved local config:
+
+- `VITE_API_URL`
+- `VITE_SCANNER_API_KEY`
+
+It also depends on Firebase client configuration used by the auth components.
+
+## Permissions
+
+- `identity`
+- `storage`
+- `activeTab`
+- `scripting`
+- `tabs`
+- `debugger`
+- `sidePanel`
+
+## Related Repos
+
+- `testomniac_api`
+  Creates runs, stores state, and returns summaries
+- `testomniac_runner_service`
+  Shared scan and coverage-generation engine
+- `testomniac_types`
+  Shared request, response, and domain types
