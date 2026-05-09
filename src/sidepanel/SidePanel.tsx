@@ -93,6 +93,84 @@ interface RunSummary {
   createdAt: string | null;
 }
 
+interface NavigationMapData {
+  runId: number;
+  rootRunId: number;
+  testEnvironmentId: number | null;
+  discoveredPages: Array<{
+    id: number;
+    testEnvironmentId: number;
+    relativePath: string;
+    sourcePagePath: string | null;
+    sourceLabel: string | null;
+    isPublic: boolean;
+    createdAt: string | null;
+    updatedAt: string | null;
+  }>;
+  pageVisits: Array<{
+    id: number;
+    testRunId: number;
+    testEnvironmentId: number;
+    relativePath: string;
+    status: string;
+    redirectPath: string | null;
+    requiresLogin: boolean | null;
+    errorMessage: string | null;
+    createdAt: string | null;
+  }>;
+}
+
+interface RunStructureData {
+  runId: number;
+  rootRunId: number;
+  bundle: {
+    id: number;
+    runnerId: number;
+    title: string;
+    uid: string | null;
+    createdAt: string | null;
+  };
+  bundleRun: {
+    id: number;
+    testSuiteBundleId: number;
+    status: string;
+    startedAt: string | null;
+    completedAt: string | null;
+    createdAt: string | null;
+  };
+  suites: Array<{
+    id: number;
+    title: string;
+    priority: number;
+    suiteTags: string[];
+    suiteRuns: Array<{
+      id: number;
+      status: string;
+      startedAt: string | null;
+      completedAt: string | null;
+    }>;
+    testCases: Array<{
+      id: number;
+      title: string;
+      testType: string;
+      priority: number;
+      dependencyTestCaseId: number | null;
+      startingPath: string | null;
+      startingPageStateId: number | null;
+      caseRuns: Array<{
+        id: number;
+        status: string;
+        durationMs: number | null;
+        findings: Array<{
+          id: number;
+          type: string;
+          title: string;
+        }>;
+      }>;
+    }>;
+  }>;
+}
+
 const initialProgress: ScanProgress = {
   scanId: null,
   phase: 'idle',
@@ -108,7 +186,7 @@ const initialProgress: ScanProgress = {
   events: [],
 };
 
-type ResultTab = 'overview' | 'pages' | 'issues' | 'actions' | 'events';
+type ResultTab = 'overview' | 'map' | 'coverage' | 'issues' | 'events';
 
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
@@ -118,6 +196,12 @@ export function SidePanel() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [progress, setProgress] = useState<ScanProgress>(initialProgress);
   const [runSummary, setRunSummary] = useState<RunSummary | null>(null);
+  const [navigationMap, setNavigationMap] = useState<NavigationMapData | null>(
+    null
+  );
+  const [runStructure, setRunStructure] = useState<RunStructureData | null>(
+    null
+  );
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
@@ -475,32 +559,50 @@ export function SidePanel() {
 
     let cancelled = false;
 
-    fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(response => response.json())
-      .then(data => {
-        if (cancelled || !data?.success || !data.data) return;
-        const summary = data.data as RunSummary;
-        setRunSummary(summary);
-        setProgress(prev => ({
-          ...prev,
-          aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
-          expertiseSummary:
-            Object.keys(summary.expertiseSummary ?? {}).length > 0
-              ? Object.fromEntries(
-                  Object.entries(summary.expertiseSummary).map(
-                    ([name, counts]) => [
-                      name,
-                      {
-                        warnings: counts.warnings,
-                        errors: counts.errors,
-                      },
-                    ]
+    Promise.all([
+      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(response => response.json()),
+      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/navigation-map`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(response => response.json()),
+      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/structure`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then(response => response.json()),
+    ])
+      .then(([summaryData, mapData, structureData]) => {
+        if (cancelled) return;
+
+        if (summaryData?.success && summaryData.data) {
+          const summary = summaryData.data as RunSummary;
+          setRunSummary(summary);
+          setProgress(prev => ({
+            ...prev,
+            aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+            expertiseSummary:
+              Object.keys(summary.expertiseSummary ?? {}).length > 0
+                ? Object.fromEntries(
+                    Object.entries(summary.expertiseSummary).map(
+                      ([name, counts]) => [
+                        name,
+                        {
+                          warnings: counts.warnings,
+                          errors: counts.errors,
+                        },
+                      ]
+                    )
                   )
-                )
-              : (prev.expertiseSummary ?? null),
-        }));
+                : (prev.expertiseSummary ?? null),
+          }));
+        }
+
+        if (mapData?.success && mapData.data) {
+          setNavigationMap(mapData.data as NavigationMapData);
+        }
+
+        if (structureData?.success && structureData.data) {
+          setRunStructure(structureData.data as RunStructureData);
+        }
       })
       .catch(() => {});
 
@@ -516,7 +618,6 @@ export function SidePanel() {
 
   const phases = [
     { key: 'scanning', label: 'Scanning' },
-    { key: 'decomposing', label: 'Analyzing' },
     { key: 'testing', label: 'Testing' },
     { key: 'completed', label: 'Complete' },
   ];
@@ -780,7 +881,7 @@ export function SidePanel() {
           {(
             [
               {
-                key: 'pages',
+                key: 'map',
                 label: 'Pages',
                 value: progress.pagesFound,
                 color: 'text-blue-600',
@@ -794,7 +895,7 @@ export function SidePanel() {
                 ring: 'ring-purple-300',
               },
               {
-                key: 'actions',
+                key: 'coverage',
                 label: 'Tests',
                 value: progress.testRunsCompleted,
                 color: 'text-green-600',
@@ -828,14 +929,14 @@ export function SidePanel() {
       )}
 
       {/* Tab bar */}
-      {(isScanning || progress.isComplete) && progress.events.length > 0 && (
+      {(isScanning || progress.isComplete) && (
         <div className='flex border-b border-gray-200'>
           {(
             [
               { key: 'overview', label: 'Overview' },
-              { key: 'pages', label: 'Pages' },
+              { key: 'map', label: 'Navigation' },
               { key: 'issues', label: 'Findings' },
-              { key: 'actions', label: 'Tests' },
+              { key: 'coverage', label: 'Coverage' },
               { key: 'events', label: 'All Events' },
             ] as const
           ).map(tab => (
@@ -917,42 +1018,36 @@ export function SidePanel() {
             </>
           )}
 
-          {resultTab === 'pages' && (
+          {resultTab === 'map' && (
             <div
               ref={eventLogRef}
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
-              {progress.events
-                .filter(
-                  e => e.type === 'page_discovered' || e.type === 'navigate'
-                )
-                .map((event, i) => (
+              {(navigationMap?.discoveredPages ?? []).map(page => {
+                const visit = navigationMap?.pageVisits.find(
+                  item => item.relativePath === page.relativePath
+                );
+                return (
                   <div
-                    key={i}
+                    key={page.id}
                     className='px-2 py-1 border-b border-gray-100 last:border-0'
                   >
-                    <span className='text-gray-400'>
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>{' '}
-                    <span
-                      className={
-                        event.type === 'page_discovered'
-                          ? 'text-blue-600'
-                          : 'text-gray-500'
-                      }
-                    >
-                      {event.type === 'page_discovered'
-                        ? 'discovered'
-                        : 'navigated'}
-                    </span>{' '}
-                    <span className='text-gray-700'>{event.message}</span>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='text-gray-700'>{page.relativePath}</span>
+                      <span className='text-blue-600'>
+                        {visit?.status ?? 'discovered'}
+                      </span>
+                    </div>
+                    <div className='mt-0.5 text-gray-500 leading-4'>
+                      from {page.sourcePagePath || 'root'}
+                      {page.sourceLabel ? ` via ${page.sourceLabel}` : ''}
+                    </div>
                   </div>
-                ))}
-              {progress.events.filter(
-                e => e.type === 'page_discovered' || e.type === 'navigate'
-              ).length === 0 && (
+                );
+              })}
+              {(navigationMap?.discoveredPages.length ?? 0) === 0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No pages yet
+                  No navigation map yet
                 </div>
               )}
             </div>
@@ -988,48 +1083,75 @@ export function SidePanel() {
             </div>
           )}
 
-          {resultTab === 'actions' && (
+          {resultTab === 'coverage' && (
             <div
               ref={eventLogRef}
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
-              {progress.events
-                .filter(e =>
-                  [
-                    'test_passed',
-                    'test_failed',
-                    'test_suite_created',
-                    'decomposition_started',
-                    'decomposition_completed',
-                  ].includes(e.type)
-                )
-                .map((event, i) => (
-                  <div
-                    key={i}
-                    className='px-2 py-1 border-b border-gray-100 last:border-0'
-                  >
-                    <span className='text-gray-400'>
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>{' '}
-                    <span
-                      className={
-                        event.type === 'test_failed'
-                          ? 'text-red-600'
-                          : 'text-green-600'
-                      }
-                    >
-                      {event.type}
-                    </span>{' '}
-                    <span className='text-gray-600'>{event.message}</span>
+              {runStructure && (
+                <div className='border-b border-gray-100 px-2 py-1.5 bg-gray-50'>
+                  <div className='text-gray-700 font-semibold'>
+                    Bundle: {runStructure.bundle.title}
                   </div>
-                ))}
-              {progress.events.filter(e =>
-                ['test_passed', 'test_failed', 'test_suite_created'].includes(
-                  e.type
-                )
-              ).length === 0 && (
+                  <div className='text-gray-500'>
+                    Run {runStructure.bundleRun.id} ·{' '}
+                    {runStructure.bundleRun.status}
+                  </div>
+                </div>
+              )}
+              {(runStructure?.suites ?? []).map(suite => (
+                <div
+                  key={suite.id}
+                  className='border-b border-gray-100 last:border-0'
+                >
+                  <div className='px-2 py-1 bg-white border-b border-gray-100'>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='text-gray-800'>{suite.title}</span>
+                      <span className='text-green-600'>
+                        {suite.suiteRuns.map(run => run.status).join(', ') ||
+                          'pending'}
+                      </span>
+                    </div>
+                    <div className='text-gray-500'>
+                      {suite.testCases.length} case
+                      {suite.testCases.length === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                  {suite.testCases.map(testCase => (
+                    <div
+                      key={testCase.id}
+                      className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
+                    >
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='text-gray-700'>{testCase.title}</span>
+                        <span className='text-gray-500'>
+                          {testCase.testType}
+                        </span>
+                      </div>
+                      <div className='text-gray-500'>
+                        start {testCase.startingPath || '/'}
+                        {testCase.dependencyTestCaseId
+                          ? ` · depends on #${testCase.dependencyTestCaseId}`
+                          : ''}
+                      </div>
+                      {testCase.caseRuns.map(caseRun => (
+                        <div key={caseRun.id} className='mt-1 text-gray-600'>
+                          run {caseRun.id} · {caseRun.status}
+                          {caseRun.durationMs != null
+                            ? ` · ${caseRun.durationMs}ms`
+                            : ''}
+                          {caseRun.findings.length > 0
+                            ? ` · ${caseRun.findings.length} finding${caseRun.findings.length === 1 ? '' : 's'}`
+                            : ''}
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {(runStructure?.suites.length ?? 0) === 0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No test runs yet
+                  No coverage tree yet
                 </div>
               )}
             </div>

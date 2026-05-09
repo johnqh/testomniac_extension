@@ -2,14 +2,15 @@
  * Background Service Worker
  *
  * Thin wrapper that creates a ChromeAdapter and calls the shared
- * runScan() orchestrator from testomniac_runner_service.
+ * runTestRun() orchestrator from testomniac_runner_service.
  * Sends progress updates to the side panel via chrome.runtime.sendMessage.
  */
 
 import { ChromeAdapter } from '../adapters/ChromeAdapter';
 import {
   ApiClient,
-  runScan,
+  runTestRun,
+  createDefaultExpertises,
   type ScanEventHandler,
 } from '@sudobility/testomniac_runner_service';
 
@@ -168,7 +169,7 @@ async function loadConfig() {
 }
 
 // ============================================================================
-// Scan Orchestration — delegates to shared runScan()
+// Scan Orchestration — delegates to shared runTestRun()
 // ============================================================================
 
 let scanAbortController: AbortController | null = null;
@@ -262,6 +263,7 @@ async function startScan(
     const eventHandler: ScanEventHandler = {
       onPageFound(page) {
         LOG(`[event] pageFound: ${page.relativePath} (id=${page.pageId})`);
+        scanState.phase = 'scanning';
         scanState.currentPageUrl = page.relativePath;
         addEvent('page_discovered', page.relativePath);
       },
@@ -269,28 +271,21 @@ async function startScan(
         LOG(
           `[event] pageStateCreated: id=${state.pageStateId} pageId=${state.pageId}`
         );
+        scanState.phase = 'scanning';
         addEvent('state_captured', 'Page state captured');
-      },
-      onDecompositionJobCreated(job) {
-        LOG(
-          `[event] decompositionJobCreated: jobId=${job.jobId} pageStateId=${job.pageStateId}`
-        );
-        addEvent('decomposition_started', `Job ${job.jobId} started`);
-      },
-      onDecompositionJobCompleted(job) {
-        LOG(`[event] decompositionJobCompleted: jobId=${job.jobId}`);
-        addEvent('decomposition_completed', `Job ${job.jobId} completed`);
       },
       onTestSuiteCreated(suite) {
         LOG(
           `[event] testSuiteCreated: suiteId=${suite.suiteId} title=${suite.title}`
         );
+        scanState.phase = 'testing';
         addEvent('test_suite_created', suite.title);
       },
       onTestCaseRunCompleted(run) {
         LOG(
           `[event] testCaseRunCompleted: testCaseRunId=${run.testCaseRunId} passed=${run.passed}`
         );
+        scanState.phase = 'testing';
         addEvent(
           run.passed ? 'test_case_passed' : 'test_case_failed',
           `Test case run ${run.testCaseRunId}`
@@ -346,17 +341,16 @@ async function startScan(
     };
 
     // Call the shared orchestrator
+    const expertises = createDefaultExpertises();
     LOG(
-      `Calling runScan(adapter, {scanId=${runId}, runnerId=${runnerId}, scanUrl=${url}, baseUrl=${new URL(url).origin}}, api, eventHandler)`
+      `Calling runTestRun(adapter, {testRunId=${runId}, runnerId=${runnerId}, baseUrl=${new URL(url).origin}}, api, expertises, eventHandler)`
     );
-    const result = await runScan(
+    const result = await runTestRun(
       adapter,
       {
-        scanId: runId,
         testRunId: runId,
         runnerId,
         testEnvironmentId: run.testEnvironmentId ?? undefined,
-        scanUrl: url,
         baseUrl: new URL(url).origin,
         sizeClass: 'desktop',
         runnerInstanceId: crypto.randomUUID(),
@@ -364,9 +358,10 @@ async function startScan(
         signal: scanAbortController?.signal,
       },
       api,
+      expertises,
       eventHandler
     );
-    LOG(`runScan returned:`, result);
+    LOG(`runTestRun returned:`, result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Scan failed';
     ERR('SCAN FAILED:', err);
