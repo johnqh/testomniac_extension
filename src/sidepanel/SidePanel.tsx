@@ -46,6 +46,7 @@ interface ResolveEnvironmentApiResponse {
 
 interface ScanProgress {
   isRunning?: boolean;
+  isPaused?: boolean;
   scanId?: number | null;
   phase: string;
   pagesFound: number;
@@ -216,10 +217,11 @@ const EXPERTISE_OPTIONS: ExpertiseOption[] = [
 const PHASE_ORDER: Record<string, number> = {
   idle: 0,
   scanning: 1,
-  testing: 2,
-  completed: 3,
-  failed: 3,
-  stopped: 3,
+  paused: 2,
+  testing: 3,
+  completed: 4,
+  failed: 4,
+  stopped: 4,
 };
 
 export function SidePanel() {
@@ -270,7 +272,12 @@ export function SidePanel() {
       const prevPhaseRank = PHASE_ORDER[prev.phase] ?? 0;
       const nextPhaseRank = PHASE_ORDER[next.phase] ?? 0;
       const mergedPhase =
-        nextPhaseRank >= prevPhaseRank ? next.phase : prev.phase;
+        (prev.phase === 'paused' && next.phase === 'scanning') ||
+        (prev.phase === 'scanning' && next.phase === 'paused')
+          ? next.phase
+          : nextPhaseRank >= prevPhaseRank
+            ? next.phase
+            : prev.phase;
 
       return {
         ...prev,
@@ -602,7 +609,7 @@ export function SidePanel() {
         const data = response?.data as ScanProgress | undefined;
         if (!data) return;
         setProgress(prev => mergeProgress(prev, data));
-        if (data.isRunning) {
+        if (data.isRunning || data.isPaused) {
           setIsScanning(true);
         } else if (data.isComplete) {
           setIsScanning(false);
@@ -615,6 +622,8 @@ export function SidePanel() {
         setProgress(prev => mergeProgress(prev, message.data as ScanProgress));
         if (message.data.isComplete) {
           setIsScanning(false);
+        } else if (message.data.isRunning || message.data.isPaused) {
+          setIsScanning(true);
         }
       }
       if (message.type === 'SCAN_ERROR') {
@@ -744,8 +753,17 @@ export function SidePanel() {
     setIsScanning(false);
   }, []);
 
+  const handlePause = useCallback(() => {
+    chrome.runtime.sendMessage({ type: 'PAUSE_SCAN' }).catch(() => {});
+  }, []);
+
+  const handleResume = useCallback(() => {
+    chrome.runtime.sendMessage({ type: 'RESUME_SCAN' }).catch(() => {});
+  }, []);
+
   const phases = [
     { key: 'scanning', label: 'Scanning' },
+    { key: 'paused', label: 'Paused' },
     { key: 'completed', label: 'Complete' },
   ];
 
@@ -994,14 +1012,31 @@ export function SidePanel() {
         </button>
       )}
 
-      {/* Stop button when scanning */}
+      {/* Scan controls when active */}
       {isScanning && (
-        <button
-          onClick={handleStop}
-          className='w-full py-2 px-3 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white'
-        >
-          Stop Scan
-        </button>
+        <div className='grid grid-cols-2 gap-2'>
+          {progress.isPaused ? (
+            <button
+              onClick={handleResume}
+              className='w-full py-2 px-3 text-sm font-medium rounded-md bg-blue-600 hover:bg-blue-700 text-white'
+            >
+              Resume Scan
+            </button>
+          ) : (
+            <button
+              onClick={handlePause}
+              className='w-full py-2 px-3 text-sm font-medium rounded-md bg-amber-500 hover:bg-amber-600 text-white'
+            >
+              Pause Scan
+            </button>
+          )}
+          <button
+            onClick={handleStop}
+            className='w-full py-2 px-3 text-sm font-medium rounded-md bg-red-600 hover:bg-red-700 text-white'
+          >
+            Stop Scan
+          </button>
+        </div>
       )}
 
       {error && (
