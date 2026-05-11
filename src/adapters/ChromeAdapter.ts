@@ -567,6 +567,7 @@ export class ChromeAdapter implements BrowserAdapter {
           url: payload.response.url || request?.url || '',
           status: payload.response.status || 0,
           contentType: payload.response.mimeType || '',
+          timestampMs: Date.now(),
         };
         this.networkLogBuffer.push(entry);
         for (const handler of this.responseHandlers) {
