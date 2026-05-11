@@ -457,7 +457,16 @@ async function runScanSession(
         LOG(`[event] findingCreated: ${finding.type}: ${finding.title}`);
         if (finding.type === 'error') {
           scanState.findingsFound += 1;
-          addEvent('finding', `${finding.type}: ${finding.title}`);
+          const detail = (
+            finding as typeof finding & { description?: string }
+          ).description?.trim();
+          const summaryLine = detail ? detail.split('\n')[0] : '';
+          addEvent(
+            'finding',
+            summaryLine
+              ? `${finding.type}: ${finding.title} — ${summaryLine}`
+              : `${finding.type}: ${finding.title}`
+          );
         }
       },
       onStatsUpdated(stats) {
