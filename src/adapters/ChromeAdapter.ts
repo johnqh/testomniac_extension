@@ -1,5 +1,7 @@
 import type { BrowserAdapter } from '@sudobility/testomniac_runner_service';
 
+const REPLAY_SELECTOR_PREFIX = 'tmnc-replay:';
+
 /**
  * Chrome extension adapter implementing BrowserAdapter.
  * Uses chrome.tabs, chrome.scripting, and chrome.debugger APIs.
@@ -25,6 +27,131 @@ export class ChromeAdapter implements BrowserAdapter {
     this.tabId = tabId;
   }
 
+  private async materializeSelector(selector: string): Promise<string> {
+    if (!selector.startsWith(REPLAY_SELECTOR_PREFIX)) {
+      return selector;
+    }
+
+    const token = `tmnc-replay-${Date.now()}-${Math.random()
+      .toString(36)
+      .slice(2, 8)}`;
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      func: (rawSelector: string, replayToken: string, prefix: string) => {
+        const normalize = (value: string | null | undefined) =>
+          (value ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+        const isVisible = (el: Element) => {
+          if (!(el instanceof HTMLElement)) return false;
+          const rect = el.getBoundingClientRect();
+          return !el.hidden && rect.width > 0 && rect.height > 0;
+        };
+        const params = new URLSearchParams(rawSelector.slice(prefix.length));
+        const spec = {
+          css: params.get('css')?.trim() || '',
+          tagName: params.get('tagName')?.trim() || '',
+          role: params.get('role')?.trim() || '',
+          inputType: params.get('inputType')?.trim() || '',
+          accessibleName: params.get('accessibleName')?.trim() || '',
+          textContent: params.get('textContent')?.trim() || '',
+          href: params.get('href')?.trim() || '',
+          testId: params.get('testId')?.trim() || '',
+          id: params.get('id')?.trim() || '',
+          name: params.get('name')?.trim() || '',
+          placeholder: params.get('placeholder')?.trim() || '',
+        };
+        const mark = (el: Element | null) => {
+          if (!(el instanceof HTMLElement)) return null;
+          el.setAttribute('data-tmnc-replay-target', replayToken);
+          return `[data-tmnc-replay-target="${replayToken}"]`;
+        };
+
+        if (spec.css) {
+          const match = document.querySelector(spec.css);
+          if (match && isVisible(match)) return mark(match);
+        }
+
+        for (const testSelector of spec.testId
+          ? [
+              `[data-testid="${spec.testId}"]`,
+              `[data-test-id="${spec.testId}"]`,
+              `[data-test="${spec.testId}"]`,
+            ]
+          : []) {
+          const match = document.querySelector(testSelector);
+          if (match && isVisible(match)) return mark(match);
+        }
+
+        if (spec.id) {
+          const match = document.getElementById(spec.id);
+          if (match && isVisible(match)) return mark(match);
+        }
+
+        const candidates = Array.from(
+          document.querySelectorAll(spec.tagName || '*')
+        );
+        const match = candidates.find(candidate => {
+          if (!isVisible(candidate)) return false;
+          if (
+            spec.role &&
+            normalize(candidate.getAttribute('role')) !== normalize(spec.role)
+          ) {
+            const tagName = candidate.tagName.toLowerCase();
+            const roleMatchesImplicitTag =
+              (spec.role === 'link' && tagName === 'a') ||
+              (spec.role === 'button' && tagName === 'button');
+            if (!roleMatchesImplicitTag) return false;
+          }
+          if (
+            spec.inputType &&
+            normalize((candidate as HTMLInputElement).type) !==
+              normalize(spec.inputType)
+          ) {
+            return false;
+          }
+          if (
+            spec.href &&
+            normalize(candidate.getAttribute('href')) !== normalize(spec.href)
+          ) {
+            return false;
+          }
+          if (
+            spec.name &&
+            normalize(candidate.getAttribute('name')) !== normalize(spec.name)
+          ) {
+            return false;
+          }
+          if (
+            spec.placeholder &&
+            normalize(candidate.getAttribute('placeholder')) !==
+              normalize(spec.placeholder)
+          ) {
+            return false;
+          }
+
+          const candidateName = normalize(
+            candidate.getAttribute('aria-label') || candidate.textContent
+          );
+          const expectedNames = [
+            normalize(spec.accessibleName),
+            normalize(spec.textContent),
+          ].filter(Boolean);
+          return (
+            expectedNames.length === 0 ||
+            expectedNames.some(
+              expected =>
+                candidateName === expected || candidateName.includes(expected)
+            )
+          );
+        });
+
+        return mark(match ?? null);
+      },
+      args: [selector, token, REPLAY_SELECTOR_PREFIX],
+    });
+
+    return result?.result || selector;
+  }
+
   async goto(
     url: string,
     options?: { waitUntil?: string; timeout?: number }
@@ -36,7 +163,8 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async click(selector: string, options?: { timeout?: number }): Promise<void> {
-    const found = await this.waitForSelector(selector, {
+    const resolvedSelector = await this.materializeSelector(selector);
+    const found = await this.waitForSelector(resolvedSelector, {
       visible: true,
       timeout: options?.timeout || 5000,
     });
@@ -99,12 +227,12 @@ export class ChromeAdapter implements BrowserAdapter {
               ?.tagName.toLowerCase() ?? 'unknown',
         };
       },
-      args: [selector],
+      args: [resolvedSelector],
     });
 
     if (result?.result) {
       const { x, y } = result.result;
-      await this.withInteractionMarker(selector, 'click', async () => {
+      await this.withInteractionMarker(resolvedSelector, 'click', async () => {
         await this.ensureDebugger();
 
         // Dispatch CDP mouse events (with pointerType for proper click synthesis)
@@ -146,7 +274,8 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async hover(selector: string, options?: { timeout?: number }): Promise<void> {
-    const found = await this.waitForSelector(selector, {
+    const resolvedSelector = await this.materializeSelector(selector);
+    const found = await this.waitForSelector(resolvedSelector, {
       visible: true,
       timeout: options?.timeout || 5000,
     });
@@ -174,12 +303,12 @@ export class ChromeAdapter implements BrowserAdapter {
         );
         return { x, y };
       },
-      args: [selector],
+      args: [resolvedSelector],
     });
 
     if (result?.result) {
       const { x, y } = result.result;
-      await this.withInteractionMarker(selector, 'hover', async () => {
+      await this.withInteractionMarker(resolvedSelector, 'hover', async () => {
         await this.ensureDebugger();
         // Move mouse to element (triggers mouseenter + mouseover on the page)
         await chrome.debugger.sendCommand(
@@ -195,7 +324,8 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async type(selector: string, text: string): Promise<void> {
-    await this.withInteractionMarker(selector, 'input', async () => {
+    const resolvedSelector = await this.materializeSelector(selector);
+    await this.withInteractionMarker(resolvedSelector, 'input', async () => {
       await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
         func: (sel: string, val: string) => {
@@ -220,13 +350,14 @@ export class ChromeAdapter implements BrowserAdapter {
 
           el.dispatchEvent(new Event('blur', { bubbles: true }));
         },
-        args: [selector, text],
+        args: [resolvedSelector, text],
       });
     });
   }
 
   async submitTextEntry(selector: string): Promise<void> {
-    await this.withInteractionMarker(selector, 'keyboard', async () => {
+    const resolvedSelector = await this.materializeSelector(selector);
+    await this.withInteractionMarker(resolvedSelector, 'keyboard', async () => {
       await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
         func: (sel: string) => {
@@ -234,7 +365,7 @@ export class ChromeAdapter implements BrowserAdapter {
           if (!el) return;
           el.focus();
         },
-        args: [selector],
+        args: [resolvedSelector],
       });
       await this.pressKey('Enter');
     });
@@ -244,6 +375,7 @@ export class ChromeAdapter implements BrowserAdapter {
     selector: string,
     options?: { visible?: boolean; timeout?: number }
   ): Promise<boolean> {
+    const resolvedSelector = await this.materializeSelector(selector);
     const timeout = options?.timeout || 5000;
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -270,7 +402,7 @@ export class ChromeAdapter implements BrowserAdapter {
             Number(style.opacity) >= 0.05
           );
         },
-        args: [selector, options?.visible ?? false],
+        args: [resolvedSelector, options?.visible ?? false],
       });
       if (result?.result) return true;
       await new Promise(r => setTimeout(r, 200));
@@ -384,7 +516,8 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async select(selector: string, value: string): Promise<void> {
-    await this.withInteractionMarker(selector, 'select', async () => {
+    const resolvedSelector = await this.materializeSelector(selector);
+    await this.withInteractionMarker(resolvedSelector, 'select', async () => {
       await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
         func: (sel: string, val: string) => {
@@ -414,7 +547,7 @@ export class ChromeAdapter implements BrowserAdapter {
 
           el.dispatchEvent(new Event('change', { bubbles: true }));
         },
-        args: [selector, value],
+        args: [resolvedSelector, value],
       });
     });
   }
