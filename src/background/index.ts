@@ -434,14 +434,14 @@ async function runScanSession(
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
         addEvent('test_surface_created', surface.title);
       },
-      onTestElementRunCompleted(run) {
+      onTestInteractionRunCompleted(run) {
         LOG(
-          `[event] testElementRunCompleted: testElementRunId=${run.testElementRunId} passed=${run.passed}`
+          `[event] testInteractionRunCompleted: testInteractionRunId=${run.testInteractionRunId} passed=${run.passed}`
         );
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
         addEvent(
-          run.passed ? 'test_element_passed' : 'test_element_failed',
-          `Test case run ${run.testElementRunId}`
+          run.passed ? 'test_interaction_passed' : 'test_interaction_failed',
+          `Test case run ${run.testInteractionRunId}`
         );
       },
       onTestRunCompleted(run) {

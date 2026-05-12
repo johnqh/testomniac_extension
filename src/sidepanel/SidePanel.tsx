@@ -157,15 +157,15 @@ interface RunStructureData {
       startedAt: string | null;
       completedAt: string | null;
     }>;
-    testElements: Array<{
+    testInteractions: Array<{
       id: number;
       title: string;
       testType: string;
       priority: number;
-      dependencyTestElementId: number | null;
+      dependencyTestInteractionId: number | null;
       startingPath: string | null;
       startingPageStateId: number | null;
-      elementRuns: Array<{
+      interactionRuns: Array<{
         id: number;
         status: string;
         durationMs: number | null;
@@ -184,7 +184,7 @@ interface RunPageSummary {
   relativePath: string;
   latestScreenshotPath: string | null;
   pageStatesCount: number;
-  testElementRunsCount: number;
+  testInteractionRunsCount: number;
   errors: number;
 }
 
@@ -871,7 +871,7 @@ export function SidePanel() {
               testRunsCompleted: Math.max(
                 prev.testRunsCompleted,
                 pages.reduce(
-                  (total, page) => total + (page.testElementRunsCount ?? 0),
+                  (total, page) => total + (page.testInteractionRunsCount ?? 0),
                   0
                 )
               ),
@@ -1006,7 +1006,7 @@ export function SidePanel() {
   const elementRunContext = new Map<
     number,
     {
-      testElementId: number;
+      testInteractionId: number;
       title: string;
       testType: string;
       surfaceTitle: string;
@@ -1014,36 +1014,37 @@ export function SidePanel() {
       status: string;
       durationMs: number | null;
       findingsCount: number;
-      dependencyTestElementId: number | null;
+      dependencyTestInteractionId: number | null;
     }
   >();
   for (const surface of runStructure?.surfaces ?? []) {
-    for (const testElement of surface.testElements) {
-      for (const elementRun of testElement.elementRuns) {
+    for (const testInteraction of surface.testInteractions) {
+      for (const elementRun of testInteraction.interactionRuns) {
         elementRunContext.set(elementRun.id, {
-          testElementId: testElement.id,
-          title: testElement.title,
-          testType: testElement.testType,
+          testInteractionId: testInteraction.id,
+          title: testInteraction.title,
+          testType: testInteraction.testType,
           surfaceTitle: surface.title,
-          startingPath: testElement.startingPath,
+          startingPath: testInteraction.startingPath,
           status: elementRun.status,
           durationMs: elementRun.durationMs,
           findingsCount: elementRun.findings.length,
-          dependencyTestElementId: testElement.dependencyTestElementId,
+          dependencyTestInteractionId:
+            testInteraction.dependencyTestInteractionId,
         });
       }
     }
   }
   const enrichedEventRows = progress.events.slice(-200).map((event, index) => {
     const runMatch = /Test case run (\d+)/.exec(event.message);
-    const testElementRunId = runMatch ? Number(runMatch[1]) : null;
-    const context = testElementRunId
-      ? (elementRunContext.get(testElementRunId) ?? null)
+    const testInteractionRunId = runMatch ? Number(runMatch[1]) : null;
+    const context = testInteractionRunId
+      ? (elementRunContext.get(testInteractionRunId) ?? null)
       : null;
     return {
       key: `${event.timestamp}-${index}`,
       event,
-      testElementRunId,
+      testInteractionRunId,
       context,
     };
   });
@@ -1584,44 +1585,46 @@ export function SidePanel() {
                       </span>
                     </div>
                     <div className='text-gray-500'>
-                      {surface.testElements.length} element
-                      {surface.testElements.length === 1 ? '' : 's'}
+                      {surface.testInteractions.length} element
+                      {surface.testInteractions.length === 1 ? '' : 's'}
                     </div>
                   </div>
-                  {surface.testElements.map(testElement => (
+                  {surface.testInteractions.map(testInteraction => (
                     <div
-                      key={testElement.id}
+                      key={testInteraction.id}
                       className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
                     >
                       <div className='flex items-start justify-between gap-2'>
                         <div className='min-w-0'>
                           <div className='text-gray-700 break-words'>
-                            {testElement.title}
+                            {testInteraction.title}
                           </div>
                           <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px]'>
                             <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
-                              {testElement.testType}
+                              {testInteraction.testType}
                             </span>
                             <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
-                              element #{testElement.id}
+                              element #{testInteraction.id}
                             </span>
                             <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
-                              {testElement.elementRuns.length} run
-                              {testElement.elementRuns.length === 1 ? '' : 's'}
+                              {testInteraction.interactionRuns.length} run
+                              {testInteraction.interactionRuns.length === 1
+                                ? ''
+                                : 's'}
                             </span>
                           </div>
                         </div>
                         <span className='text-gray-500 whitespace-nowrap'>
-                          p{testElement.priority}
+                          p{testInteraction.priority}
                         </span>
                       </div>
                       <div className='text-gray-500'>
-                        start {testElement.startingPath || '/'}
-                        {testElement.dependencyTestElementId
-                          ? ` · depends on #${testElement.dependencyTestElementId}`
+                        start {testInteraction.startingPath || '/'}
+                        {testInteraction.dependencyTestInteractionId
+                          ? ` · depends on #${testInteraction.dependencyTestInteractionId}`
                           : ''}
                       </div>
-                      {testElement.elementRuns.map(elementRun => (
+                      {testInteraction.interactionRuns.map(elementRun => (
                         <div
                           key={elementRun.id}
                           className='mt-1 rounded border border-gray-200 bg-white px-2 py-1 text-gray-600'
@@ -1662,7 +1665,7 @@ export function SidePanel() {
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
               {enrichedEventRows.map(
-                ({ key, event, testElementRunId, context }) => (
+                ({ key, event, testInteractionRunId, context }) => (
                   <div
                     key={key}
                     className='px-2 py-0.5 border-b border-gray-100 last:border-0'
@@ -1681,19 +1684,19 @@ export function SidePanel() {
                           {context.surfaceTitle}
                         </span>
                         <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                          element #{context.testElementId}
+                          element #{context.testInteractionId}
                         </span>
                         <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                          run #{testElementRunId}
+                          run #{testInteractionRunId}
                         </span>
                         {context.startingPath && (
                           <span className='rounded bg-gray-100 px-1.5 py-0.5'>
                             {context.startingPath}
                           </span>
                         )}
-                        {context.dependencyTestElementId != null && (
+                        {context.dependencyTestInteractionId != null && (
                           <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                            depends on #{context.dependencyTestElementId}
+                            depends on #{context.dependencyTestInteractionId}
                           </span>
                         )}
                       </div>

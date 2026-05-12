@@ -104,48 +104,44 @@ export class ChromeAdapter implements BrowserAdapter {
 
     if (result?.result) {
       const { x, y } = result.result;
-      await this.showInteractionMarker(selector, 'click');
-      await this.ensureDebugger();
+      await this.withInteractionMarker(selector, 'click', async () => {
+        await this.ensureDebugger();
 
-      // Dispatch CDP mouse events (with pointerType for proper click synthesis)
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchMouseEvent',
-        { type: 'mouseMoved', x, y, pointerType: 'mouse' }
-      );
-      await new Promise(r => setTimeout(r, 50));
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mousePressed',
-          x,
-          y,
-          button: 'left',
-          clickCount: 1,
-          pointerType: 'mouse',
-        }
-      );
-      await new Promise(r => setTimeout(r, 30));
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchMouseEvent',
-        {
-          type: 'mouseReleased',
-          x,
-          y,
-          button: 'left',
-          clickCount: 1,
-          pointerType: 'mouse',
-        }
-      );
-
-      await this.hideInteractionMarker();
-
+        // Dispatch CDP mouse events (with pointerType for proper click synthesis)
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchMouseEvent',
+          { type: 'mouseMoved', x, y, pointerType: 'mouse' }
+        );
+        await new Promise(r => setTimeout(r, 50));
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchMouseEvent',
+          {
+            type: 'mousePressed',
+            x,
+            y,
+            button: 'left',
+            clickCount: 1,
+            pointerType: 'mouse',
+          }
+        );
+        await new Promise(r => setTimeout(r, 30));
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchMouseEvent',
+          {
+            type: 'mouseReleased',
+            x,
+            y,
+            button: 'left',
+            clickCount: 1,
+            pointerType: 'mouse',
+          }
+        );
+      });
       return;
     }
-
-    await this.hideInteractionMarker();
     throw new Error(`Could not resolve clickable point for ${selector}`);
   }
 
@@ -183,14 +179,15 @@ export class ChromeAdapter implements BrowserAdapter {
 
     if (result?.result) {
       const { x, y } = result.result;
-      await this.showInteractionMarker(selector, 'hover');
-      await this.ensureDebugger();
-      // Move mouse to element (triggers mouseenter + mouseover on the page)
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchMouseEvent',
-        { type: 'mouseMoved', x, y }
-      );
+      await this.withInteractionMarker(selector, 'hover', async () => {
+        await this.ensureDebugger();
+        // Move mouse to element (triggers mouseenter + mouseover on the page)
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchMouseEvent',
+          { type: 'mouseMoved', x, y }
+        );
+      });
       return;
     }
 
@@ -198,45 +195,49 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async type(selector: string, text: string): Promise<void> {
-    await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: (sel: string, val: string) => {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        if (!el) return;
-        el.focus();
+    await this.withInteractionMarker(selector, 'input', async () => {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: (sel: string, val: string) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return;
+          el.focus();
 
-        if (
-          el instanceof HTMLInputElement ||
-          el instanceof HTMLTextAreaElement
-        ) {
-          el.value = val;
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        } else if (el.isContentEditable) {
-          el.textContent = val;
-          el.dispatchEvent(
-            new InputEvent('input', { bubbles: true, data: val })
-          );
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        }
+          if (
+            el instanceof HTMLInputElement ||
+            el instanceof HTMLTextAreaElement
+          ) {
+            el.value = val;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          } else if (el.isContentEditable) {
+            el.textContent = val;
+            el.dispatchEvent(
+              new InputEvent('input', { bubbles: true, data: val })
+            );
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
 
-        el.dispatchEvent(new Event('blur', { bubbles: true }));
-      },
-      args: [selector, text],
+          el.dispatchEvent(new Event('blur', { bubbles: true }));
+        },
+        args: [selector, text],
+      });
     });
   }
 
   async submitTextEntry(selector: string): Promise<void> {
-    await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: (sel: string) => {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        if (!el) return;
-        el.focus();
-      },
-      args: [selector],
+    await this.withInteractionMarker(selector, 'keyboard', async () => {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: (sel: string) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return;
+          el.focus();
+        },
+        args: [selector],
+      });
+      await this.pressKey('Enter');
     });
-    await this.pressKey('Enter');
   }
 
   async waitForSelector(
@@ -361,56 +362,60 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async pressKey(key: string): Promise<void> {
-    await this.ensureDebugger();
-    await chrome.debugger.sendCommand(
-      { tabId: this.tabId },
-      'Input.dispatchKeyEvent',
-      {
-        type: 'keyDown',
-        key,
-      }
-    );
-    await chrome.debugger.sendCommand(
-      { tabId: this.tabId },
-      'Input.dispatchKeyEvent',
-      {
-        type: 'keyUp',
-        key,
-      }
-    );
+    await this.withActiveElementMarker('keyboard', async () => {
+      await this.ensureDebugger();
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Input.dispatchKeyEvent',
+        {
+          type: 'keyDown',
+          key,
+        }
+      );
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Input.dispatchKeyEvent',
+        {
+          type: 'keyUp',
+          key,
+        }
+      );
+    });
   }
 
   async select(selector: string, value: string): Promise<void> {
-    await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: (sel: string, val: string) => {
-        const el = document.querySelector(sel) as HTMLSelectElement | null;
-        if (!el) return;
+    await this.withInteractionMarker(selector, 'select', async () => {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: (sel: string, val: string) => {
+          const el = document.querySelector(sel) as HTMLSelectElement | null;
+          if (!el) return;
 
-        if (val.startsWith('__index__:')) {
-          const index = Number(val.slice('__index__:'.length));
-          if (
-            Number.isFinite(index) &&
-            index >= 0 &&
-            index < el.options.length
-          ) {
-            el.selectedIndex = index;
-          }
-        } else {
-          el.value = val;
-          if (el.value !== val) {
-            const option = Array.from(el.options).find(
-              candidate => candidate.textContent?.trim() === val
-            );
-            if (option) {
-              el.value = option.value;
+          if (val.startsWith('__index__:')) {
+            const index = Number(val.slice('__index__:'.length));
+            if (
+              Number.isFinite(index) &&
+              index >= 0 &&
+              index < el.options.length
+            ) {
+              el.selectedIndex = index;
+            }
+          } else {
+            el.value = val;
+            if (el.value !== val) {
+              const option = Array.from(el.options).find(
+                candidate => candidate.textContent?.trim() === val
+              );
+              if (option) {
+                el.value = option.value;
+              }
             }
           }
-        }
 
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      },
-      args: [selector, value],
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        },
+        args: [selector, value],
+      });
     });
   }
 
@@ -588,14 +593,64 @@ export class ChromeAdapter implements BrowserAdapter {
     });
   }
 
+  private async withInteractionMarker<T>(
+    selector: string,
+    mode: 'hover' | 'click' | 'input' | 'keyboard' | 'select',
+    action: () => Promise<T>
+  ): Promise<T> {
+    await this.showInteractionMarker(selector, mode);
+    try {
+      return await action();
+    } finally {
+      await this.hideInteractionMarker();
+    }
+  }
+
+  private async withActiveElementMarker<T>(
+    mode: 'keyboard' | 'input' | 'select',
+    action: () => Promise<T>
+  ): Promise<T> {
+    const [result] = await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      func: () => {
+        const active = document.activeElement as HTMLElement | null;
+        if (!active) return null;
+        if (active === document.body || active === document.documentElement) {
+          return null;
+        }
+        if (active.hasAttribute('data-tmnc-id')) {
+          return `[data-tmnc-id="${active.getAttribute('data-tmnc-id')}"]`;
+        }
+        if (active.id) {
+          const cssEscape = globalThis.CSS?.escape?.bind(globalThis.CSS);
+          if (!cssEscape) {
+            return null;
+          }
+          return `#${cssEscape(active.id)}`;
+        }
+        return null;
+      },
+    });
+
+    const selector = result?.result;
+    if (!selector) {
+      return action();
+    }
+
+    return this.withInteractionMarker(selector, mode, action);
+  }
+
   private async showInteractionMarker(
     selector: string,
-    mode: 'hover' | 'click'
+    mode: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
   ): Promise<void> {
     this.markerVisible = true;
     await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
-      func: (sel: string, interaction: 'hover' | 'click') => {
+      func: (
+        sel: string,
+        interaction: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
+      ) => {
         const el = document.querySelector(sel) as HTMLElement | null;
         if (!el) return;
 
@@ -617,13 +672,19 @@ export class ChromeAdapter implements BrowserAdapter {
           document.documentElement.appendChild(marker);
         }
 
-        // Yellow/amber for click, blue/cyan for hover
+        // Distinct colors by interaction type for quick visual scanning
         if (interaction === 'click') {
           marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
           marker.style.background = 'rgba(245, 158, 11, 0.2)';
-        } else {
+        } else if (interaction === 'hover') {
           marker.style.border = '2px solid rgba(59, 130, 246, 0.9)';
           marker.style.background = 'rgba(59, 130, 246, 0.2)';
+        } else if (interaction === 'select') {
+          marker.style.border = '2px solid rgba(168, 85, 247, 0.9)';
+          marker.style.background = 'rgba(168, 85, 247, 0.2)';
+        } else {
+          marker.style.border = '2px solid rgba(34, 197, 94, 0.9)';
+          marker.style.background = 'rgba(34, 197, 94, 0.2)';
         }
 
         marker.style.left = `${rect.left - 4}px`;
