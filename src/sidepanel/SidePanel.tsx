@@ -18,6 +18,42 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
+function normalizeApiError(
+  error: unknown,
+  fallback: string = 'Request failed'
+): string {
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error;
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>;
+
+    if (
+      typeof record.message === 'string' &&
+      record.message.trim().length > 0
+    ) {
+      return record.message;
+    }
+
+    if (typeof record.error === 'string' && record.error.trim().length > 0) {
+      return record.error;
+    }
+
+    if (record.data && typeof record.data === 'object') {
+      const data = record.data as Record<string, unknown>;
+      if (typeof data.message === 'string' && data.message.trim().length > 0) {
+        return data.message;
+      }
+      if (typeof data.error === 'string' && data.error.trim().length > 0) {
+        return data.error;
+      }
+    }
+  }
+
+  return fallback;
+}
+
 interface EntityOption {
   id: string;
   entitySlug: string;
@@ -639,8 +675,10 @@ export function SidePanel() {
         !environmentData.success ||
         !environmentData.data?.testEnvironmentId
       ) {
-        const err =
-          environmentData.error || 'Failed to resolve scan environment';
+        const err = normalizeApiError(
+          environmentData,
+          'Failed to resolve scan environment'
+        );
         console.error('[SidePanel] Environment resolution failed:', err);
         setError(err);
         return;
@@ -704,8 +742,7 @@ export function SidePanel() {
         });
         setError(null);
       } else {
-        const err =
-          scanData.data?.message || scanData.error || 'Failed to submit scan';
+        const err = normalizeApiError(scanData, 'Failed to submit scan');
         console.error('[SidePanel] Scan creation failed:', err, scanData);
         setError(err);
       }
