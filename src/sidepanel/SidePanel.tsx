@@ -182,9 +182,23 @@ interface RunStructureData {
 interface RunPageSummary {
   pageId: number;
   relativePath: string;
+  latestScreenshotPath: string | null;
   pageStatesCount: number;
   testElementRunsCount: number;
   errors: number;
+}
+
+interface ProductEnvironmentOption {
+  id: number;
+  productId: number;
+  title: string;
+  baseUrl: string;
+  kind: 'local' | 'shared';
+  label: string;
+  ownerUserId: string | null;
+  githubBranch: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
 }
 
 const initialProgress: ScanProgress = {
@@ -224,6 +238,38 @@ const PHASE_ORDER: Record<string, number> = {
   stopped: 4,
 };
 
+function normalizeHostname(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^www\./, '');
+}
+
+function getEnvironmentMatchScore(
+  activeUrl: URL,
+  environmentBaseUrl: string
+): number {
+  try {
+    const environmentUrl = new URL(environmentBaseUrl);
+    const activeOrigin = activeUrl.origin.toLowerCase();
+    const environmentOrigin = environmentUrl.origin.toLowerCase();
+    const activeHostname = normalizeHostname(activeUrl.hostname);
+    const environmentHostname = normalizeHostname(environmentUrl.hostname);
+
+    if (activeOrigin === environmentOrigin) {
+      return 3;
+    }
+
+    if (activeHostname === environmentHostname) {
+      return 2;
+    }
+
+    return 0;
+  } catch {
+    return 0;
+  }
+}
+
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
@@ -238,6 +284,12 @@ export function SidePanel() {
   const [runStructure, setRunStructure] = useState<RunStructureData | null>(
     null
   );
+  const [runPageSummaries, setRunPageSummaries] = useState<RunPageSummary[]>(
+    []
+  );
+  const [liveScreenshotDataUrl, setLiveScreenshotDataUrl] = useState<
+    string | null
+  >(null);
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
@@ -321,6 +373,7 @@ export function SidePanel() {
   useEffect(() => {
     if (!selectedEntityId || !token) {
       setProducts([]);
+      setSelectedProductId('');
       return;
     }
     const entity = entities.find(e => e.id === selectedEntityId);
@@ -344,6 +397,84 @@ export function SidePanel() {
       .catch(() => {})
       .finally(() => setLoadingProducts(false));
   }, [selectedEntityId, token, entities]);
+
+  useEffect(() => {
+    if (!token || !activeTabUrl || products.length === 0) {
+      if (products.length === 0) {
+        setSelectedProductId('__create__');
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const currentTabUrl = activeTabUrl;
+
+    async function autoSelectProductFromEnvironment() {
+      let activeUrl: URL;
+      try {
+        activeUrl = new URL(currentTabUrl);
+      } catch {
+        setSelectedProductId('__create__');
+        return;
+      }
+
+      const environmentResponses = await Promise.all(
+        products.map(async product => {
+          try {
+            const response = await fetch(
+              `${API_URL}/api/v1/products/${product.id}/environments`,
+              {
+                headers: { Authorization: `Bearer ${token}` },
+              }
+            );
+            const data = await response.json();
+            const environments =
+              data.success && Array.isArray(data.data)
+                ? (data.data as ProductEnvironmentOption[])
+                : [];
+            return { product, environments };
+          } catch {
+            return { product, environments: [] as ProductEnvironmentOption[] };
+          }
+        })
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      let bestMatch: { productId: string; score: number } | null = null;
+
+      for (const { product, environments } of environmentResponses) {
+        for (const environment of environments) {
+          const score = getEnvironmentMatchScore(
+            activeUrl,
+            environment.baseUrl
+          );
+          if (
+            score > 0 &&
+            (!bestMatch ||
+              score > bestMatch.score ||
+              (score === bestMatch.score &&
+                Number(product.id) < Number(bestMatch.productId)))
+          ) {
+            bestMatch = {
+              productId: String(product.id),
+              score,
+            };
+          }
+        }
+      }
+
+      setSelectedProductId(bestMatch?.productId ?? '__create__');
+    }
+
+    void autoSelectProductFromEnvironment();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTabUrl, products, token]);
 
   // Get active tab URL
   useEffect(() => {
@@ -557,6 +688,11 @@ export function SidePanel() {
           currentPageUrl: activeTabUrl,
         });
         setRunSummary(null);
+        setNavigationMap(null);
+        setRunStructure(null);
+        setRunPageSummaries([]);
+        setLiveScreenshotDataUrl(null);
+        setResultTab('overview');
         setIsScanning(true);
         chrome.runtime.sendMessage({
           type: 'START_SCAN',
@@ -609,6 +745,9 @@ export function SidePanel() {
         const data = response?.data as ScanProgress | undefined;
         if (!data) return;
         setProgress(prev => mergeProgress(prev, data));
+        if (data.latestScreenshotDataUrl) {
+          setLiveScreenshotDataUrl(data.latestScreenshotDataUrl);
+        }
         if (data.isRunning || data.isPaused) {
           setIsScanning(true);
         } else if (data.isComplete) {
@@ -620,10 +759,32 @@ export function SidePanel() {
     const listener = (message: { type: string; data?: ScanProgress }) => {
       if (message.type === 'SCAN_PROGRESS' && message.data) {
         setProgress(prev => mergeProgress(prev, message.data as ScanProgress));
+        if (message.data.latestScreenshotDataUrl) {
+          setLiveScreenshotDataUrl(message.data.latestScreenshotDataUrl);
+        }
         if (message.data.isComplete) {
           setIsScanning(false);
         } else if (message.data.isRunning || message.data.isPaused) {
           setIsScanning(true);
+        }
+      }
+      if (
+        message.type === 'SCREENSHOT_CAPTURED' &&
+        message.data &&
+        typeof message.data === 'object'
+      ) {
+        const payload = message.data as {
+          dataUrl?: string;
+          pageUrl?: string;
+        };
+        const dataUrl = payload.dataUrl;
+        if (dataUrl) {
+          setLiveScreenshotDataUrl(dataUrl);
+          setProgress(prev => ({
+            ...prev,
+            latestScreenshotDataUrl: dataUrl,
+            currentPageUrl: payload.pageUrl ?? prev.currentPageUrl ?? null,
+          }));
         }
       }
       if (message.type === 'SCAN_ERROR') {
@@ -696,6 +857,7 @@ export function SidePanel() {
 
           if (pagesData?.success && Array.isArray(pagesData.data)) {
             const pages = pagesData.data as RunPageSummary[];
+            setRunPageSummaries(pages);
             setProgress(prev => ({
               ...prev,
               pagesFound: Math.max(prev.pagesFound, pages.length),
@@ -803,10 +965,88 @@ export function SidePanel() {
       description: finding.description,
     }));
   const errorCount = Math.max(summaryErrorCount, progress.findingsFound);
-  const findingRows =
-    summaryFindingRows && summaryFindingRows.length > 0
-      ? summaryFindingRows
-      : eventFindingRows;
+  const findingRows = [...(summaryFindingRows ?? []), ...eventFindingRows]
+    .filter(
+      (finding, index, rows) =>
+        rows.findIndex(
+          candidate =>
+            candidate.message === finding.message &&
+            candidate.description === finding.description
+        ) === index
+    )
+    .sort((left, right) => right.timestamp - left.timestamp);
+  const currentRelativePath = progress.currentPageUrl
+    ? (() => {
+        try {
+          return progress.currentPageUrl.startsWith('http')
+            ? `${new URL(progress.currentPageUrl).pathname}${new URL(progress.currentPageUrl).search}`
+            : progress.currentPageUrl;
+        } catch {
+          return progress.currentPageUrl;
+        }
+      })()
+    : null;
+  const fallbackScreenshotPath =
+    runPageSummaries.find(
+      page =>
+        currentRelativePath != null &&
+        page.relativePath === currentRelativePath &&
+        page.latestScreenshotPath
+    )?.latestScreenshotPath ??
+    [...runPageSummaries].reverse().find(page => page.latestScreenshotPath)
+      ?.latestScreenshotPath ??
+    null;
+  const overviewScreenshotUrl = progress.latestScreenshotDataUrl
+    ? progress.latestScreenshotDataUrl
+    : liveScreenshotDataUrl
+      ? liveScreenshotDataUrl
+      : fallbackScreenshotPath
+        ? `${API_URL}/api/v1/artifacts/${fallbackScreenshotPath}`
+        : null;
+  const elementRunContext = new Map<
+    number,
+    {
+      testElementId: number;
+      title: string;
+      testType: string;
+      surfaceTitle: string;
+      startingPath: string | null;
+      status: string;
+      durationMs: number | null;
+      findingsCount: number;
+      dependencyTestElementId: number | null;
+    }
+  >();
+  for (const surface of runStructure?.surfaces ?? []) {
+    for (const testElement of surface.testElements) {
+      for (const elementRun of testElement.elementRuns) {
+        elementRunContext.set(elementRun.id, {
+          testElementId: testElement.id,
+          title: testElement.title,
+          testType: testElement.testType,
+          surfaceTitle: surface.title,
+          startingPath: testElement.startingPath,
+          status: elementRun.status,
+          durationMs: elementRun.durationMs,
+          findingsCount: elementRun.findings.length,
+          dependencyTestElementId: testElement.dependencyTestElementId,
+        });
+      }
+    }
+  }
+  const enrichedEventRows = progress.events.slice(-200).map((event, index) => {
+    const runMatch = /Test case run (\d+)/.exec(event.message);
+    const testElementRunId = runMatch ? Number(runMatch[1]) : null;
+    const context = testElementRunId
+      ? (elementRunContext.get(testElementRunId) ?? null)
+      : null;
+    return {
+      key: `${event.timestamp}-${index}`,
+      event,
+      testElementRunId,
+      context,
+    };
+  });
 
   if (loading) {
     return (
@@ -1233,14 +1473,14 @@ export function SidePanel() {
                   </span>
                 </div>
               )}
-              {progress.latestScreenshotDataUrl && (
+              {overviewScreenshotUrl && (
                 <img
-                  src={progress.latestScreenshotDataUrl}
+                  src={overviewScreenshotUrl}
                   alt='Current page'
                   className='w-full h-auto'
                 />
               )}
-              {!progress.latestScreenshotDataUrl && (
+              {!overviewScreenshotUrl && (
                 <div className='p-4 text-center text-xs text-gray-400'>
                   Waiting for screenshot...
                 </div>
@@ -1353,12 +1593,26 @@ export function SidePanel() {
                       key={testElement.id}
                       className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
                     >
-                      <div className='flex items-center justify-between gap-2'>
-                        <span className='text-gray-700'>
-                          {testElement.title}
-                        </span>
-                        <span className='text-gray-500'>
-                          {testElement.testType}
+                      <div className='flex items-start justify-between gap-2'>
+                        <div className='min-w-0'>
+                          <div className='text-gray-700 break-words'>
+                            {testElement.title}
+                          </div>
+                          <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px]'>
+                            <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
+                              {testElement.testType}
+                            </span>
+                            <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
+                              element #{testElement.id}
+                            </span>
+                            <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
+                              {testElement.elementRuns.length} run
+                              {testElement.elementRuns.length === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                        </div>
+                        <span className='text-gray-500 whitespace-nowrap'>
+                          p{testElement.priority}
                         </span>
                       </div>
                       <div className='text-gray-500'>
@@ -1368,7 +1622,10 @@ export function SidePanel() {
                           : ''}
                       </div>
                       {testElement.elementRuns.map(elementRun => (
-                        <div key={elementRun.id} className='mt-1 text-gray-600'>
+                        <div
+                          key={elementRun.id}
+                          className='mt-1 rounded border border-gray-200 bg-white px-2 py-1 text-gray-600'
+                        >
                           {(() => {
                             const errorFindings = elementRun.findings.filter(
                               finding => finding.type === 'error'
@@ -1404,18 +1661,57 @@ export function SidePanel() {
               ref={eventLogRef}
               className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
             >
-              {progress.events.slice(-50).map((event, i) => (
-                <div
-                  key={i}
-                  className='px-2 py-0.5 border-b border-gray-100 last:border-0'
-                >
-                  <span className='text-gray-400'>
-                    {new Date(event.timestamp).toLocaleTimeString()}
-                  </span>{' '}
-                  <span className='text-blue-600'>{event.type}</span>{' '}
-                  <span className='text-gray-600'>{event.message}</span>
-                </div>
-              ))}
+              {enrichedEventRows.map(
+                ({ key, event, testElementRunId, context }) => (
+                  <div
+                    key={key}
+                    className='px-2 py-0.5 border-b border-gray-100 last:border-0'
+                  >
+                    <span className='text-gray-400'>
+                      {new Date(event.timestamp).toLocaleTimeString()}
+                    </span>{' '}
+                    <span className='text-blue-600'>{event.type}</span>{' '}
+                    <span className='text-gray-600'>{event.message}</span>
+                    {context && (
+                      <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-gray-500'>
+                        <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
+                          {context.testType}
+                        </span>
+                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+                          {context.surfaceTitle}
+                        </span>
+                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+                          element #{context.testElementId}
+                        </span>
+                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+                          run #{testElementRunId}
+                        </span>
+                        {context.startingPath && (
+                          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+                            {context.startingPath}
+                          </span>
+                        )}
+                        {context.dependencyTestElementId != null && (
+                          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+                            depends on #{context.dependencyTestElementId}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {context && (
+                      <div className='mt-0.5 text-gray-700 break-words'>
+                        {context.title}
+                        {context.durationMs != null
+                          ? ` · ${context.durationMs}ms`
+                          : ''}
+                        {context.findingsCount > 0
+                          ? ` · ${context.findingsCount} finding${context.findingsCount === 1 ? '' : 's'}`
+                          : ''}
+                      </div>
+                    )}
+                  </div>
+                )
+              )}
             </div>
           )}
         </div>

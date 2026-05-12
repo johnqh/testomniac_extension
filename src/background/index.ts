@@ -483,6 +483,9 @@ async function runScanSession(
         scanState.latestScreenshotDataUrl = data.dataUrl;
         scanState.currentPageUrl = data.pageUrl;
         sendProgressToSidePanel();
+        chrome.runtime
+          .sendMessage({ type: 'SCREENSHOT_CAPTURED', data })
+          .catch(() => {});
       },
       onScanComplete(summary: ScanCompleteSummary) {
         LOG(

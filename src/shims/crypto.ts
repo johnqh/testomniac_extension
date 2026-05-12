@@ -5,7 +5,7 @@
  */
 
 export function createHash(algorithm: string) {
-  if (algorithm !== 'sha256') {
+  if (algorithm !== 'sha256' && algorithm !== 'sha1') {
     throw new Error(`Unsupported hash algorithm: ${algorithm}`);
   }
 
