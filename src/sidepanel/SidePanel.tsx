@@ -329,6 +329,23 @@ export function SidePanel() {
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsApiUrl, setSettingsApiUrl] = useState('');
+  const [settingsApiKey, setSettingsApiKey] = useState('');
+  const [settingsClickWaitMs, setSettingsClickWaitMs] = useState('500');
+
+  // Load settings from storage when settings panel opens
+  useEffect(() => {
+    if (!showSettings) return;
+    chrome.storage.local
+      .get(['apiUrl', 'apiKey', 'clickWaitMs'])
+      .then(stored => {
+        if (stored.apiUrl) setSettingsApiUrl(stored.apiUrl as string);
+        if (stored.apiKey) setSettingsApiKey(stored.apiKey as string);
+        if (stored.clickWaitMs != null)
+          setSettingsClickWaitMs(String(stored.clickWaitMs));
+      });
+  }, [showSettings]);
 
   // Entity & product selection
   const [entities, setEntities] = useState<EntityOption[]>([]);
@@ -1141,6 +1158,13 @@ export function SidePanel() {
           <span className='text-xs text-gray-500 truncate max-w-[140px]'>
             {user?.email}
           </span>
+          <button
+            onClick={() => setShowSettings(s => !s)}
+            className={`text-xs font-medium ${showSettings ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+            title='Settings'
+          >
+            Settings
+          </button>
           {!isScanning && (
             <button
               onClick={() => signOut()}
@@ -1151,6 +1175,67 @@ export function SidePanel() {
           )}
         </div>
       </div>
+
+      {/* Settings Panel */}
+      {showSettings && (
+        <div className='bg-gray-50 border border-gray-200 rounded-lg p-3 space-y-3'>
+          <div className='font-medium text-xs text-gray-700'>Settings</div>
+          <div>
+            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+              API URL
+            </label>
+            <input
+              type='text'
+              value={settingsApiUrl}
+              onChange={e => setSettingsApiUrl(e.target.value)}
+              placeholder='http://localhost:8027'
+              className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+            />
+          </div>
+          <div>
+            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+              API Key
+            </label>
+            <input
+              type='password'
+              value={settingsApiKey}
+              onChange={e => setSettingsApiKey(e.target.value)}
+              placeholder='Scanner API key'
+              className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+            />
+          </div>
+          <div>
+            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+              Click Wait Time (ms)
+            </label>
+            <input
+              type='number'
+              value={settingsClickWaitMs}
+              onChange={e => setSettingsClickWaitMs(e.target.value)}
+              min='0'
+              step='100'
+              className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+            />
+            <p className='text-[10px] text-gray-400 mt-0.5'>
+              Delay after each click to wait for navigation. Default: 500ms.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              chrome.runtime.sendMessage({
+                type: 'SAVE_CONFIG',
+                apiUrl: settingsApiUrl,
+                apiKey: settingsApiKey,
+                clickWaitMs: Number(settingsClickWaitMs) || 500,
+              });
+              setShowSettings(false);
+            }}
+            className='w-full bg-blue-600 text-white text-xs font-medium py-1.5 rounded hover:bg-blue-700'
+          >
+            Save Settings
+          </button>
+        </div>
+      )}
 
       {/* Workspace & Product selectors */}
       {!isScanning && (

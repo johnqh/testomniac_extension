@@ -10,6 +10,7 @@ import { ChromeAdapter } from '../adapters/ChromeAdapter';
 import {
   ApiClient,
   runTestRun,
+  setClickWaitMs,
   type ScanEventHandler,
   type Expertise,
   TesterExpertise,
@@ -29,6 +30,7 @@ const DEFAULT_API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 const DEFAULT_API_KEY = import.meta.env.VITE_SCANNER_API_KEY || '';
 let apiUrl = DEFAULT_API_URL;
 let apiKey = DEFAULT_API_KEY;
+let clickWaitMs = 500;
 const REQUIRED_EXPERTISE_SLUG = 'tester';
 
 function createExpertises(slugs?: string[] | null): Expertise[] {
@@ -267,10 +269,18 @@ function sendProgressToSidePanel() {
 
 async function loadConfig() {
   LOG('Loading config from chrome.storage.local...');
-  const stored = await chrome.storage.local.get(['apiUrl', 'apiKey']);
+  const stored = await chrome.storage.local.get([
+    'apiUrl',
+    'apiKey',
+    'clickWaitMs',
+  ]);
   if (stored.apiUrl) apiUrl = stored.apiUrl as string;
   if (stored.apiKey) apiKey = stored.apiKey as string;
-  LOG(`Config loaded: apiUrl=${apiUrl}, hasApiKey=${!!apiKey}`);
+  if (stored.clickWaitMs != null) clickWaitMs = Number(stored.clickWaitMs);
+  setClickWaitMs(clickWaitMs);
+  LOG(
+    `Config loaded: apiUrl=${apiUrl}, hasApiKey=${!!apiKey}, clickWaitMs=${clickWaitMs}`
+  );
 }
 
 async function ensureExtensionInstanceId(): Promise<string> {
@@ -661,13 +671,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.session.set({ firebaseToken: message.token || null });
     sendResponse({ ok: true });
   } else if (message.type === 'SAVE_CONFIG') {
-    LOG(`SAVE_CONFIG: apiUrl=${message.apiUrl}, hasApiKey=${!!message.apiKey}`);
+    LOG(
+      `SAVE_CONFIG: apiUrl=${message.apiUrl}, hasApiKey=${!!message.apiKey}, clickWaitMs=${message.clickWaitMs}`
+    );
+    const newClickWaitMs =
+      message.clickWaitMs != null ? Number(message.clickWaitMs) : clickWaitMs;
     chrome.storage.local.set({
       apiUrl: message.apiUrl || apiUrl,
       apiKey: message.apiKey || apiKey,
+      clickWaitMs: newClickWaitMs,
     });
     apiUrl = message.apiUrl || apiUrl;
     apiKey = message.apiKey || apiKey;
+    clickWaitMs = newClickWaitMs;
+    setClickWaitMs(clickWaitMs);
     sendResponse({ ok: true });
   }
   return true;

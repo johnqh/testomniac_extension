@@ -236,37 +236,45 @@ export class ChromeAdapter implements BrowserAdapter {
         await this.ensureDebugger();
 
         // Dispatch CDP mouse events (with pointerType for proper click synthesis)
-        await chrome.debugger.sendCommand(
-          { tabId: this.tabId },
-          'Input.dispatchMouseEvent',
-          { type: 'mouseMoved', x, y, pointerType: 'mouse' }
-        );
-        await new Promise(r => setTimeout(r, 50));
-        await chrome.debugger.sendCommand(
-          { tabId: this.tabId },
-          'Input.dispatchMouseEvent',
-          {
-            type: 'mousePressed',
-            x,
-            y,
-            button: 'left',
-            clickCount: 1,
-            pointerType: 'mouse',
-          }
-        );
-        await new Promise(r => setTimeout(r, 30));
-        await chrome.debugger.sendCommand(
-          { tabId: this.tabId },
-          'Input.dispatchMouseEvent',
-          {
-            type: 'mouseReleased',
-            x,
-            y,
-            button: 'left',
-            clickCount: 1,
-            pointerType: 'mouse',
-          }
-        );
+        try {
+          await chrome.debugger.sendCommand(
+            { tabId: this.tabId },
+            'Input.dispatchMouseEvent',
+            { type: 'mouseMoved', x, y, pointerType: 'mouse' }
+          );
+          await new Promise(r => setTimeout(r, 50));
+          await chrome.debugger.sendCommand(
+            { tabId: this.tabId },
+            'Input.dispatchMouseEvent',
+            {
+              type: 'mousePressed',
+              x,
+              y,
+              button: 'left',
+              clickCount: 1,
+              pointerType: 'mouse',
+            }
+          );
+          await new Promise(r => setTimeout(r, 30));
+          await chrome.debugger.sendCommand(
+            { tabId: this.tabId },
+            'Input.dispatchMouseEvent',
+            {
+              type: 'mouseReleased',
+              x,
+              y,
+              button: 'left',
+              clickCount: 1,
+              pointerType: 'mouse',
+            }
+          );
+        } catch {
+          // Click may have triggered navigation that destroyed the frame.
+          // Wait for the page to settle and re-establish the debugger.
+          this.debuggerAttached = false;
+          await this.waitForTabLoad(5000);
+          await this.ensureDebugger();
+        }
       });
       return;
     }
