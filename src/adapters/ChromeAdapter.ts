@@ -128,18 +128,46 @@ export class ChromeAdapter implements BrowserAdapter {
             return false;
           }
 
-          const candidateName = normalize(
-            candidate.getAttribute('aria-label') || candidate.textContent
-          );
+          // Gather all accessible name sources for the candidate
+          const labelledById = candidate.getAttribute('aria-labelledby');
+          const labelledByText = labelledById
+            ? normalize(
+                labelledById
+                  .split(/\s+/)
+                  .map(refId => document.getElementById(refId)?.textContent)
+                  .filter(Boolean)
+                  .join(' ')
+              )
+            : '';
+          const associatedLabel =
+            candidate instanceof HTMLElement && 'labels' in candidate
+              ? normalize(
+                  Array.from((candidate as HTMLInputElement).labels ?? [])
+                    .map(l => l.textContent)
+                    .join(' ')
+                )
+              : '';
+          const candidateNames = [
+            normalize(candidate.getAttribute('aria-label')),
+            labelledByText,
+            associatedLabel,
+            normalize(candidate.getAttribute('title')),
+            normalize(candidate.textContent),
+          ].filter(Boolean);
+
           const expectedNames = [
             normalize(spec.accessibleName),
             normalize(spec.textContent),
           ].filter(Boolean);
           return (
             expectedNames.length === 0 ||
-            expectedNames.some(
-              expected =>
-                candidateName === expected || candidateName.includes(expected)
+            expectedNames.some(expected =>
+              candidateNames.some(
+                name =>
+                  name === expected ||
+                  name.includes(expected) ||
+                  expected.includes(name)
+              )
             )
           );
         });
