@@ -1108,9 +1108,7 @@ export function SidePanel() {
         ? new Date(finding.createdAt).getTime()
         : Date.now(),
       badge: finding.type,
-      message: finding.expertise
-        ? `[${finding.expertise}] ${finding.title}`
-        : finding.title,
+      message: finding.title,
       description: finding.description,
       findingTitle: finding.title,
     }));

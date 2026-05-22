@@ -638,17 +638,21 @@ export class ChromeAdapter implements BrowserAdapter {
   // --- Private helpers ---
 
   /**
-   * Verify the tab is on an http/https page before attempting
-   * chrome.scripting.executeScript, which cannot access chrome-extension://,
-   * chrome://, about:, or other non-web URLs.
+   * Verify the tab is not on a browser-internal page that
+   * chrome.scripting.executeScript cannot access (chrome-extension:// of
+   * another extension, chrome://, devtools://, etc.).
+   *
+   * Uses a blocklist so that about:blank, data:, http(s):, file: and other
+   * scriptable URLs are not rejected.
    */
   private async ensureAccessiblePage(): Promise<void> {
     const tab = await chrome.tabs.get(this.tabId);
     const url = tab.url || '';
     if (
-      !url.startsWith('http://') &&
-      !url.startsWith('https://') &&
-      !url.startsWith('file://')
+      url.startsWith('chrome-extension://') ||
+      url.startsWith('chrome://') ||
+      url.startsWith('chrome-error://') ||
+      url.startsWith('devtools://')
     ) {
       throw new Error(
         `Cannot access a non-web page (${url.slice(0, 80)}), skipping interaction`
