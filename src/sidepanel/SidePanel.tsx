@@ -103,7 +103,12 @@ interface ScanProgress {
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
   isComplete: boolean;
-  events: Array<{ type: string; message: string; timestamp: number }>;
+  events: Array<{
+    type: string;
+    message: string;
+    timestamp: number;
+    findingTitle?: string;
+  }>;
 }
 
 interface RunSummary {
@@ -1093,6 +1098,7 @@ export function SidePanel() {
       badge: 'error',
       message: event.message,
       description: '',
+      findingTitle: event.findingTitle ?? '',
     }));
   const summaryFindingRows = runSummary?.recentFindings
     ?.filter(finding => finding.type === 'error')
@@ -1106,15 +1112,17 @@ export function SidePanel() {
         ? `[${finding.expertise}] ${finding.title}`
         : finding.title,
       description: finding.description,
+      findingTitle: finding.title,
     }));
   const errorCount = Math.max(summaryErrorCount, progress.findingsFound);
   const findingRows = [...(summaryFindingRows ?? []), ...eventFindingRows]
     .filter(
       (finding, index, rows) =>
-        rows.findIndex(
-          candidate =>
-            candidate.message === finding.message &&
-            candidate.description === finding.description
+        rows.findIndex(candidate =>
+          candidate.findingTitle && finding.findingTitle
+            ? candidate.findingTitle === finding.findingTitle
+            : candidate.message === finding.message &&
+              candidate.description === finding.description
         ) === index
     )
     .sort((left, right) => right.timestamp - left.timestamp);

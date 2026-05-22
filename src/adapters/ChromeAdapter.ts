@@ -32,6 +32,7 @@ export class ChromeAdapter implements BrowserAdapter {
       return selector;
     }
 
+    await this.ensureAccessiblePage();
     const token = `tmnc-replay-${Date.now()}-${Math.random()
       .toString(36)
       .slice(2, 8)}`;
@@ -457,6 +458,7 @@ export class ChromeAdapter implements BrowserAdapter {
     fn: string | ((...args: unknown[]) => T),
     ...args: unknown[]
   ): Promise<T> {
+    await this.ensureAccessiblePage();
     const serializedArgs = args.map(arg => (arg === undefined ? null : arg));
 
     if (typeof fn === 'string') {
@@ -475,6 +477,7 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async content(): Promise<string> {
+    await this.ensureAccessiblePage();
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
       func: () => document.documentElement.outerHTML,
@@ -633,6 +636,25 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   // --- Private helpers ---
+
+  /**
+   * Verify the tab is on an http/https page before attempting
+   * chrome.scripting.executeScript, which cannot access chrome-extension://,
+   * chrome://, about:, or other non-web URLs.
+   */
+  private async ensureAccessiblePage(): Promise<void> {
+    const tab = await chrome.tabs.get(this.tabId);
+    const url = tab.url || '';
+    if (
+      !url.startsWith('http://') &&
+      !url.startsWith('https://') &&
+      !url.startsWith('file://')
+    ) {
+      throw new Error(
+        `Cannot access a non-web page (${url.slice(0, 80)}), skipping interaction`
+      );
+    }
+  }
 
   private async ensureDebugger(): Promise<void> {
     if (this.debuggerAttached) {

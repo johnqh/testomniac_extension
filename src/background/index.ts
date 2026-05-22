@@ -85,7 +85,12 @@ interface ScanState {
       errors: number;
     }
   > | null;
-  events: Array<{ type: string; message: string; timestamp: number }>;
+  events: Array<{
+    type: string;
+    message: string;
+    timestamp: number;
+    findingTitle?: string;
+  }>;
   isComplete: boolean;
 }
 
@@ -253,9 +258,9 @@ class PauseController {
 
 let pauseController = new PauseController(false);
 
-function addEvent(type: string, message: string) {
+function addEvent(type: string, message: string, findingTitle?: string) {
   LOG(`[event] ${type}: ${message}`);
-  scanState.events.push({ type, message, timestamp: Date.now() });
+  scanState.events.push({ type, message, timestamp: Date.now(), findingTitle });
   if (scanState.events.length > 100) scanState.events.shift();
   sendProgressToSidePanel();
 }
@@ -481,7 +486,8 @@ async function runScanSession(
             'finding',
             summaryLine
               ? `${finding.type}: ${finding.title} — ${summaryLine}`
-              : `${finding.type}: ${finding.title}`
+              : `${finding.type}: ${finding.title}`,
+            finding.title
           );
         }
       },
