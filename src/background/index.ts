@@ -190,7 +190,14 @@ let extensionInstanceId: string | null = null;
 let activeRunPromise: Promise<void> | null = null;
 
 function getSerializableScanState(): ScanState {
-  return { ...scanState, events: [...scanState.events] };
+  // Exclude latestScreenshotDataUrl from persisted state — it's large
+  // (base64 PNG) and transient.  Screenshots flow through the dedicated
+  // SCREENSHOT_CAPTURED message instead.
+  return {
+    ...scanState,
+    latestScreenshotDataUrl: null,
+    events: [...scanState.events],
+  };
 }
 
 function persistScanState() {
@@ -320,8 +327,13 @@ function addEvent(type: string, message: string, findingTitle?: string) {
 
 function sendProgressToSidePanel() {
   void persistScanState();
+  // Send progress without the large base64 screenshot to keep messages small.
+  // Screenshots are sent via the dedicated SCREENSHOT_CAPTURED message.
   chrome.runtime
-    .sendMessage({ type: 'SCAN_PROGRESS', data: { ...scanState } })
+    .sendMessage({
+      type: 'SCAN_PROGRESS',
+      data: { ...scanState, latestScreenshotDataUrl: null },
+    })
     .catch(err =>
       LOG(
         'send-progress:failed',
@@ -551,13 +563,12 @@ async function runScanSession(
         }
       },
       onStatsUpdated(stats) {
-        LOG(
-          `[event] statsUpdated: pages=${stats.pagesFound} states=${stats.pageStatesFound} testRuns=${stats.testRunsCompleted} findings=${stats.findingsFound} elapsed=${stats.elapsedMs}ms`
-        );
         scanState.pagesFound = stats.pagesFound;
         scanState.pageStatesFound = stats.pageStatesFound;
         scanState.testRunsCompleted = stats.testRunsCompleted;
-        scanState.elapsedMs = stats.elapsedMs;
+        if (typeof stats.elapsedMs === 'number') {
+          scanState.elapsedMs = stats.elapsedMs;
+        }
         sendProgressToSidePanel();
       },
       onScreenshotCaptured(data) {
