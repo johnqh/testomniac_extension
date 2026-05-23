@@ -55,29 +55,30 @@ function normalizeFindingText(text: string): string {
 function createDedupApiClient(baseUrl: string, key: string): ApiClient {
   const client = new ApiClient(baseUrl, key);
   const seenKeys = new Set<string>();
-  const origCreate = client.createTestRunFinding.bind(client);
+  const origEnsure = client.ensureTestRunFinding.bind(client);
 
-  client.createTestRunFinding = async (
-    params: Parameters<ApiClient['createTestRunFinding']>[0]
+  client.ensureTestRunFinding = async (
+    params: Parameters<ApiClient['ensureTestRunFinding']>[0]
   ) => {
     const normTitle = normalizeFindingText(params.title);
-    const normDesc = normalizeFindingText(params.description);
-    const dedupKey = `${params.type}\0${normTitle}\0${normDesc}`;
+    const dedupKey = `${params.type}\0${normTitle}\0${params.path ?? ''}`;
     if (seenKeys.has(dedupKey)) {
       LOG(`[dedup] Skipping duplicate finding: ${params.title}`);
       return {
         id: 0,
-        testInteractionRunId: params.testInteractionRunId,
+        testRunId: params.testRunId,
+        path: params.path ?? null,
         expertiseRuleId: null,
         type: params.type,
         priority: params.priority,
         title: params.title,
         description: params.description,
+        interactionRunIds: [params.testInteractionRunId],
         createdAt: null,
       };
     }
     seenKeys.add(dedupKey);
-    return origCreate(params);
+    return origEnsure(params);
   };
 
   return client;
