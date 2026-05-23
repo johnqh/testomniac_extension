@@ -700,17 +700,27 @@ async function runScanSession(
     LOG(`runTestRun returned:`, result);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Scan failed';
+    const stack = err instanceof Error ? err.stack : undefined;
     if (err instanceof Error && err.name === 'AbortError') {
       LOG('Scan aborted');
       return;
     }
-    ERR('SCAN FAILED:', err);
+    ERR('SCAN FAILED:', message);
+    ERR('SCAN FAILED stack:', stack);
+    ERR('SCAN FAILED raw:', err);
     scanState.phase = 'failed';
     scanState.isComplete = true;
     addEvent('error', message);
     chrome.runtime.sendMessage({ type: 'SCAN_ERROR', error: message });
   } finally {
     activeRunPromise = null;
+    LOG('runScanSession finally block', {
+      isPaused: scanState.isPaused,
+      isRunning: scanState.isRunning,
+      phase: scanState.phase,
+      isComplete: scanState.isComplete,
+      scanId: scanState.scanId,
+    });
     if (!scanState.isPaused) {
       scanState.isRunning = false;
     }
@@ -738,6 +748,15 @@ async function startScan(
 }
 
 async function resumePausedScan() {
+  LOG('resumePausedScan called', {
+    scanId: scanState.scanId,
+    isPaused: scanState.isPaused,
+    isRunning: scanState.isRunning,
+    phase: scanState.phase,
+    hasActiveRunPromise: activeRunPromise != null,
+    targetUrl: scanState.targetUrl,
+  });
+
   if (!scanState.scanId) {
     throw new Error('No paused scan to resume');
   }
@@ -748,8 +767,13 @@ async function resumePausedScan() {
   sendProgressToSidePanel();
 
   if (activeRunPromise) {
+    LOG('resumePausedScan: activeRunPromise exists, just unpaused controller');
     return;
   }
+
+  LOG(
+    'resumePausedScan: no activeRunPromise — restarting scan session with resumeExisting=true'
+  );
 
   const url = scanState.targetUrl;
   if (!url) {
