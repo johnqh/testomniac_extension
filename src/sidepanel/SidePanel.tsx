@@ -18,6 +18,10 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
 
+function logPanel(step: string, details?: Record<string, unknown>): void {
+  console.log('[SidePanel]', step, details ?? {});
+}
+
 function normalizeApiError(
   error: unknown,
   fallback: string = 'Request failed'
@@ -100,6 +104,7 @@ interface ScanProgress {
   environmentKind?: 'local' | 'shared';
   environmentLabel?: string | null;
   environmentHostname?: string | null;
+  elapsedMs?: number;
   currentPageUrl: string | null;
   latestScreenshotDataUrl: string | null;
   isComplete: boolean;
@@ -335,6 +340,60 @@ function getEnvironmentMatchScore(
   }
 }
 
+function formatElapsedTime(totalSeconds: number): string {
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+/**
+ * Self-contained timer display that locally interpolates between runner stats
+ * updates. Only this component re-renders on tick — the parent SidePanel does not.
+ */
+function ElapsedTimer({
+  baseElapsedMs,
+  isActive,
+  className,
+}: {
+  baseElapsedMs: number;
+  isActive: boolean;
+  className?: string;
+}) {
+  const [displaySeconds, setDisplaySeconds] = useState(
+    Math.floor(baseElapsedMs / 1000)
+  );
+  const baseRef = useRef({ ms: baseElapsedMs, receivedAt: Date.now() });
+
+  // Sync when runner reports a new elapsed value
+  useEffect(() => {
+    baseRef.current = { ms: baseElapsedMs, receivedAt: Date.now() };
+    setDisplaySeconds(Math.floor(baseElapsedMs / 1000));
+  }, [baseElapsedMs]);
+
+  // Tick locally between runner updates
+  useEffect(() => {
+    if (!isActive) return;
+    baseRef.current = { ...baseRef.current, receivedAt: Date.now() };
+
+    const interval = setInterval(() => {
+      const localElapsed = Date.now() - baseRef.current.receivedAt;
+      setDisplaySeconds(Math.floor((baseRef.current.ms + localElapsed) / 1000));
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isActive]);
+
+  return (
+    <span className={className ?? 'text-xs font-mono text-gray-500'}>
+      {formatElapsedTime(displaySeconds)}
+    </span>
+  );
+}
+
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
@@ -438,6 +497,7 @@ export function SidePanel() {
           next.testRunsCompleted
         ),
         findingsFound: Math.max(prev.findingsFound, next.findingsFound),
+        elapsedMs: Math.max(prev.elapsedMs ?? 0, next.elapsedMs ?? 0),
         events:
           next.events.length >= prev.events.length ? next.events : prev.events,
       };
@@ -461,7 +521,11 @@ export function SidePanel() {
           }
         }
       })
-      .catch(() => {})
+      .catch(err =>
+        logPanel('fetch-entities:failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      )
       .finally(() => setLoadingEntities(false));
   }, [isAuthenticated, token]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -490,7 +554,11 @@ export function SidePanel() {
           }
         }
       })
-      .catch(() => {})
+      .catch(err =>
+        logPanel('fetch-products:failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      )
       .finally(() => setLoadingProducts(false));
   }, [selectedEntityId, token, entities]);
 
@@ -529,7 +597,11 @@ export function SidePanel() {
                 ? (data.data as ProductEnvironmentOption[])
                 : [];
             return { product, environments };
-          } catch {
+          } catch (err) {
+            logPanel('fetch-environments:failed', {
+              productId: product.id,
+              error: err instanceof Error ? err.message : String(err),
+            });
             return { product, environments: [] as ProductEnvironmentOption[] };
           }
         })
@@ -589,8 +661,11 @@ export function SidePanel() {
       if (data.success && Array.isArray(data.data)) {
         setCredentials(data.data);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      logPanel('fetch-credentials:failed', {
+        entitySlug: selectedEntity?.entitySlug,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setLoadingCredentials(false);
     }
@@ -902,7 +977,11 @@ export function SidePanel() {
           setIsScanning(false);
         }
       })
-      .catch(() => {});
+      .catch(err =>
+        logPanel('fetch-scan-state:failed', {
+          error: err instanceof Error ? err.message : String(err),
+        })
+      );
 
     const listener = (message: { type: string; data?: ScanProgress }) => {
       if (message.type === 'SCAN_PROGRESS' && message.data) {
@@ -1038,7 +1117,11 @@ export function SidePanel() {
             setRunStructure(structureData.data as RunStructureData);
           }
         })
-        .catch(() => {});
+        .catch(err =>
+          logPanel('fetch-live-data:failed', {
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
 
     void fetchLiveData();
 
@@ -1064,11 +1147,19 @@ export function SidePanel() {
   }, []);
 
   const handlePause = useCallback(() => {
-    chrome.runtime.sendMessage({ type: 'PAUSE_SCAN' }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'PAUSE_SCAN' }).catch(err =>
+      logPanel('pause-scan:failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
   }, []);
 
   const handleResume = useCallback(() => {
-    chrome.runtime.sendMessage({ type: 'RESUME_SCAN' }).catch(() => {});
+    chrome.runtime.sendMessage({ type: 'RESUME_SCAN' }).catch(err =>
+      logPanel('resume-scan:failed', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
   }, []);
 
   const phases = [
@@ -1600,7 +1691,13 @@ export function SidePanel() {
                                 )
                               );
                             }
-                          } catch {
+                          } catch (err) {
+                            logPanel('save-credential:failed', {
+                              error:
+                                err instanceof Error
+                                  ? err.message
+                                  : String(err),
+                            });
                             setError('Failed to save credential');
                           } finally {
                             setSavingCredential(false);
@@ -1729,6 +1826,11 @@ export function SidePanel() {
               </div>
             );
           })}
+          <ElapsedTimer
+            baseElapsedMs={progress.elapsedMs ?? 0}
+            isActive={isScanning && !progress.isPaused}
+            className='ml-auto text-xs font-mono text-gray-500'
+          />
         </div>
       )}
 
@@ -2119,8 +2221,13 @@ export function SidePanel() {
       )}
 
       {progress.isComplete && (
-        <div className='p-2 rounded-md bg-green-50 text-green-700 text-xs font-medium'>
-          Scan complete!
+        <div className='p-2 rounded-md bg-green-50 text-green-700 text-xs font-medium flex items-center justify-between'>
+          <span>Scan complete!</span>
+          {(progress.elapsedMs ?? 0) > 0 && (
+            <span className='font-mono text-green-600'>
+              {formatElapsedTime(Math.floor((progress.elapsedMs ?? 0) / 1000))}
+            </span>
+          )}
         </div>
       )}
     </div>

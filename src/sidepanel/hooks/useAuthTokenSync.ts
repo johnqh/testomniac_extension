@@ -26,13 +26,23 @@ export function useAuthTokenSync(): string | null {
         chrome.storage.session.set({ firebaseToken: idToken });
         chrome.runtime
           .sendMessage({ type: 'SET_AUTH_TOKEN', token: idToken })
-          .catch(() => {});
+          .catch(err =>
+            console.log(
+              '[AuthSync] token-sync:failed',
+              err instanceof Error ? err.message : String(err)
+            )
+          );
       } else {
         setToken(null);
         chrome.storage.session.remove('firebaseToken');
         chrome.runtime
           .sendMessage({ type: 'SET_AUTH_TOKEN', token: null })
-          .catch(() => {});
+          .catch(err =>
+            console.log(
+              '[AuthSync] token-clear:failed',
+              err instanceof Error ? err.message : String(err)
+            )
+          );
       }
     });
 

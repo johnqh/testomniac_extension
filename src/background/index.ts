@@ -33,6 +33,56 @@ let apiKey = DEFAULT_API_KEY;
 let clickWaitMs = 500;
 const REQUIRED_EXPERTISE_SLUG = 'tester';
 
+// ---------------------------------------------------------------------------
+// Finding deduplication
+// ---------------------------------------------------------------------------
+
+/**
+ * Strip leading count numbers that vary between evaluations so
+ * "5 broken image(s)" and "3 broken image(s)" produce the same key.
+ * Mirrors PageAnalyzer.normalizeFindingText.
+ */
+function normalizeFindingText(text: string): string {
+  return text.replace(/^(\[[^\]]+\]\s*)\d+\s+/, '$1').replace(/^\d+\s+/, '');
+}
+
+/**
+ * Create an ApiClient whose createTestRunFinding method deduplicates
+ * findings within a single scan session.  Duplicate findings (same
+ * type + normalized title + normalized description) are logged and
+ * silently dropped so the DB sees only one record per unique issue.
+ */
+function createDedupApiClient(baseUrl: string, key: string): ApiClient {
+  const client = new ApiClient(baseUrl, key);
+  const seenKeys = new Set<string>();
+  const origCreate = client.createTestRunFinding.bind(client);
+
+  client.createTestRunFinding = async (
+    params: Parameters<ApiClient['createTestRunFinding']>[0]
+  ) => {
+    const normTitle = normalizeFindingText(params.title);
+    const normDesc = normalizeFindingText(params.description);
+    const dedupKey = `${params.type}\0${normTitle}\0${normDesc}`;
+    if (seenKeys.has(dedupKey)) {
+      LOG(`[dedup] Skipping duplicate finding: ${params.title}`);
+      return {
+        id: 0,
+        testInteractionRunId: params.testInteractionRunId,
+        expertiseRuleId: null,
+        type: params.type,
+        priority: params.priority,
+        title: params.title,
+        description: params.description,
+        createdAt: null,
+      };
+    }
+    seenKeys.add(dedupKey);
+    return origCreate(params);
+  };
+
+  return client;
+}
+
 function createExpertises(slugs?: string[] | null): Expertise[] {
   const registry: Record<string, () => Expertise> = {
     tester: () => new TesterExpertise(),
@@ -85,6 +135,7 @@ interface ScanState {
       errors: number;
     }
   > | null;
+  elapsedMs: number;
   events: Array<{
     type: string;
     message: string;
@@ -128,6 +179,7 @@ let scanState: ScanState = {
   latestScreenshotDataUrl: null,
   aiSummary: null,
   expertiseSummary: null,
+  elapsedMs: 0,
   events: [],
   isComplete: false,
 };
@@ -196,6 +248,7 @@ function resetState() {
     latestScreenshotDataUrl: null,
     aiSummary: null,
     expertiseSummary: null,
+    elapsedMs: 0,
     events: [],
     isComplete: false,
   };
@@ -269,7 +322,12 @@ function sendProgressToSidePanel() {
   void persistScanState();
   chrome.runtime
     .sendMessage({ type: 'SCAN_PROGRESS', data: { ...scanState } })
-    .catch(() => {});
+    .catch(err =>
+      LOG(
+        'send-progress:failed',
+        err instanceof Error ? err.message : String(err)
+      )
+    );
 }
 
 async function loadConfig() {
@@ -351,6 +409,7 @@ async function runScanSession(
     scanAbortController?.abort();
   }
   scanAbortController = new AbortController();
+  const localSignal = scanAbortController.signal;
   pauseController.setPaused(scanState.isPaused);
 
   LOG(`========== STARTING SCAN ==========`);
@@ -381,7 +440,7 @@ async function runScanSession(
   );
 
   LOG(`Creating ApiClient with baseUrl=${apiUrl}, hasApiKey=${!!apiKey}`);
-  const api = apiKey ? new ApiClient(apiUrl, apiKey) : null;
+  const api = apiKey ? createDedupApiClient(apiUrl, apiKey) : null;
 
   if (!api) {
     ERR('No API key configured — cannot scan');
@@ -493,11 +552,12 @@ async function runScanSession(
       },
       onStatsUpdated(stats) {
         LOG(
-          `[event] statsUpdated: pages=${stats.pagesFound} states=${stats.pageStatesFound} testRuns=${stats.testRunsCompleted} findings=${stats.findingsFound}`
+          `[event] statsUpdated: pages=${stats.pagesFound} states=${stats.pageStatesFound} testRuns=${stats.testRunsCompleted} findings=${stats.findingsFound} elapsed=${stats.elapsedMs}ms`
         );
         scanState.pagesFound = stats.pagesFound;
         scanState.pageStatesFound = stats.pageStatesFound;
         scanState.testRunsCompleted = stats.testRunsCompleted;
+        scanState.elapsedMs = stats.elapsedMs;
         sendProgressToSidePanel();
       },
       onScreenshotCaptured(data) {
@@ -507,7 +567,12 @@ async function runScanSession(
         sendProgressToSidePanel();
         chrome.runtime
           .sendMessage({ type: 'SCREENSHOT_CAPTURED', data })
-          .catch(() => {});
+          .catch(err =>
+            LOG(
+              'send-screenshot:failed',
+              err instanceof Error ? err.message : String(err)
+            )
+          );
       },
       onScanComplete(summary: ScanCompleteSummary) {
         LOG(
@@ -515,6 +580,7 @@ async function runScanSession(
         );
         scanState.isComplete = true;
         scanState.phase = 'completed';
+        scanState.elapsedMs = summary.durationMs;
         scanState.aiSummary = summary.aiSummary ?? null;
         scanState.expertiseSummary = summary.expertiseSummary ?? null;
         addEvent(
@@ -524,7 +590,7 @@ async function runScanSession(
       },
       onError(error) {
         ERR(`[event] scanError: ${error.message}`);
-        if (scanAbortController?.signal.aborted) return;
+        if (localSignal.aborted) return;
         scanState.phase = scanState.isPaused ? 'paused' : 'failed';
         addEvent('error', error.message);
       },
@@ -603,12 +669,12 @@ async function runScanSession(
         sizeClass: 'desktop',
         runnerInstanceId,
         runnerInstanceName,
-        signal: scanAbortController?.signal,
+        signal: localSignal,
         waitForCheckpoint: async () => {
           if (!scanState.isPaused) return;
           scanState.phase = 'paused';
           sendProgressToSidePanel();
-          await pauseController.waitIfPaused(scanAbortController?.signal);
+          await pauseController.waitIfPaused(localSignal);
           scanState.phase = 'scanning';
           sendProgressToSidePanel();
         },

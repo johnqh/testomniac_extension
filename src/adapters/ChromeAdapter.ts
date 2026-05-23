@@ -2,6 +2,10 @@ import type { BrowserAdapter } from '@sudobility/testomniac_runner_service';
 
 const REPLAY_SELECTOR_PREFIX = 'tmnc-replay:';
 
+function logAdapter(step: string, details?: Record<string, unknown>): void {
+  console.log('[ChromeAdapter]', step, details ?? {});
+}
+
 /**
  * Chrome extension adapter implementing BrowserAdapter.
  * Uses chrome.tabs, chrome.scripting, and chrome.debugger APIs.
@@ -297,11 +301,16 @@ export class ChromeAdapter implements BrowserAdapter {
               pointerType: 'mouse',
             }
           );
-        } catch {
+        } catch (err) {
           // Click may have triggered navigation that destroyed the frame.
           // Wait for the page to settle and re-establish the debugger.
+          logAdapter('click:navigation-recovery', {
+            tabId: this.tabId,
+            error: err instanceof Error ? err.message : String(err),
+          });
           this.debuggerAttached = false;
           await this.waitForTabLoad(5000);
+          await this.ensureAccessiblePage();
           await this.ensureDebugger();
         }
       });
@@ -416,6 +425,7 @@ export class ChromeAdapter implements BrowserAdapter {
     const timeout = options?.timeout || 5000;
     const start = Date.now();
     while (Date.now() - start < timeout) {
+      await this.ensureAccessiblePage();
       const [result] = await chrome.scripting.executeScript({
         target: { tabId: this.tabId },
         func: (sel: string, checkVisible: boolean) => {
@@ -499,6 +509,7 @@ export class ChromeAdapter implements BrowserAdapter {
     type?: string;
     quality?: number;
   }): Promise<Uint8Array> {
+    await this.ensureAccessiblePage();
     await this.ensureDebugger();
     const result = (await chrome.debugger.sendCommand(
       { tabId: this.tabId },
@@ -534,6 +545,7 @@ export class ChromeAdapter implements BrowserAdapter {
 
   async pressKey(key: string): Promise<void> {
     await this.withActiveElementMarker('keyboard', async () => {
+      await this.ensureAccessiblePage();
       await this.ensureDebugger();
       await chrome.debugger.sendCommand(
         { tabId: this.tabId },
@@ -595,8 +607,12 @@ export class ChromeAdapter implements BrowserAdapter {
     if (this.debuggerAttached) {
       try {
         await chrome.debugger.detach({ tabId: this.tabId });
-      } catch {
+      } catch (err) {
         // Already detached
+        logAdapter('debugger-detach:skipped', {
+          tabId: this.tabId,
+          error: String(err),
+        });
       }
       this.debuggerAttached = false;
     }
@@ -655,7 +671,7 @@ export class ChromeAdapter implements BrowserAdapter {
       url.startsWith('devtools://')
     ) {
       throw new Error(
-        `Cannot access a non-web page (${url.slice(0, 80)}), skipping interaction`
+        `Cannot access a non-web page (${url}), skipping interaction`
       );
     }
   }
@@ -668,8 +684,12 @@ export class ChromeAdapter implements BrowserAdapter {
     try {
       await chrome.debugger.attach({ tabId: this.tabId }, '1.3');
       this.debuggerAttached = true;
-    } catch {
+    } catch (err) {
       // May already be attached
+      logAdapter('debugger-attach:skipped', {
+        tabId: this.tabId,
+        error: String(err),
+      });
       this.debuggerAttached = true;
     }
     this.bindDebuggerEvents();
@@ -805,29 +825,39 @@ export class ChromeAdapter implements BrowserAdapter {
     mode: 'keyboard' | 'input' | 'select',
     action: () => Promise<T>
   ): Promise<T> {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: () => {
-        const active = document.activeElement as HTMLElement | null;
-        if (!active) return null;
-        if (active === document.body || active === document.documentElement) {
-          return null;
-        }
-        if (active.hasAttribute('data-tmnc-id')) {
-          return `[data-tmnc-id="${active.getAttribute('data-tmnc-id')}"]`;
-        }
-        if (active.id) {
-          const cssEscape = globalThis.CSS?.escape?.bind(globalThis.CSS);
-          if (!cssEscape) {
+    let selector: string | null = null;
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: () => {
+          const active = document.activeElement as HTMLElement | null;
+          if (!active) return null;
+          if (active === document.body || active === document.documentElement) {
             return null;
           }
-          return `#${cssEscape(active.id)}`;
-        }
-        return null;
-      },
-    });
+          if (active.hasAttribute('data-tmnc-id')) {
+            return `[data-tmnc-id="${active.getAttribute('data-tmnc-id')}"]`;
+          }
+          if (active.id) {
+            const cssEscape = globalThis.CSS?.escape?.bind(globalThis.CSS);
+            if (!cssEscape) {
+              return null;
+            }
+            return `#${cssEscape(active.id)}`;
+          }
+          return null;
+        },
+      });
+      selector = result?.result ?? null;
+    } catch (err) {
+      // Page may be on a non-scriptable URL — skip the marker and
+      // let the action itself report the real error.
+      logAdapter('active-element-marker:skipped', {
+        tabId: this.tabId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
-    const selector = result?.result;
     if (!selector) {
       return action();
     }
@@ -840,72 +870,91 @@ export class ChromeAdapter implements BrowserAdapter {
     mode: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
   ): Promise<void> {
     this.markerVisible = true;
-    await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: (
-        sel: string,
-        interaction: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
-      ) => {
-        const el = document.querySelector(sel) as HTMLElement | null;
-        if (!el) return;
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: (
+          sel: string,
+          interaction: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
+        ) => {
+          const el = document.querySelector(sel) as HTMLElement | null;
+          if (!el) return;
 
-        const rect = el.getBoundingClientRect();
-        let marker = document.getElementById(
-          '__tmnc-interaction-marker'
-        ) as HTMLDivElement | null;
-        if (!marker) {
-          marker = document.createElement('div');
-          marker.id = '__tmnc-interaction-marker';
-          marker.style.position = 'fixed';
-          marker.style.pointerEvents = 'none';
-          marker.style.zIndex = '2147483647';
-          marker.style.boxSizing = 'border-box';
-          marker.style.borderRadius = '8px';
+          const rect = el.getBoundingClientRect();
+          let marker = document.getElementById(
+            '__tmnc-interaction-marker'
+          ) as HTMLDivElement | null;
+          if (!marker) {
+            marker = document.createElement('div');
+            marker.id = '__tmnc-interaction-marker';
+            marker.style.position = 'fixed';
+            marker.style.pointerEvents = 'none';
+            marker.style.zIndex = '2147483647';
+            marker.style.boxSizing = 'border-box';
+            marker.style.borderRadius = '8px';
+            marker.style.opacity = '1';
+            marker.style.transition =
+              'left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, opacity 180ms ease-out, border-color 120ms ease-out, background 120ms ease-out';
+            document.documentElement.appendChild(marker);
+          }
+
+          // Distinct colors by interaction type for quick visual scanning
+          if (interaction === 'click') {
+            marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
+            marker.style.background = 'rgba(245, 158, 11, 0.2)';
+          } else if (interaction === 'hover') {
+            marker.style.border = '2px solid rgba(59, 130, 246, 0.9)';
+            marker.style.background = 'rgba(59, 130, 246, 0.2)';
+          } else if (interaction === 'select') {
+            marker.style.border = '2px solid rgba(168, 85, 247, 0.9)';
+            marker.style.background = 'rgba(168, 85, 247, 0.2)';
+          } else {
+            marker.style.border = '2px solid rgba(34, 197, 94, 0.9)';
+            marker.style.background = 'rgba(34, 197, 94, 0.2)';
+          }
+
+          marker.style.left = `${rect.left - 4}px`;
+          marker.style.top = `${rect.top - 4}px`;
+          marker.style.width = `${rect.width + 8}px`;
+          marker.style.height = `${rect.height + 8}px`;
           marker.style.opacity = '1';
-          marker.style.transition =
-            'left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out, opacity 180ms ease-out, border-color 120ms ease-out, background 120ms ease-out';
-          document.documentElement.appendChild(marker);
-        }
-
-        // Distinct colors by interaction type for quick visual scanning
-        if (interaction === 'click') {
-          marker.style.border = '2px solid rgba(245, 158, 11, 0.9)';
-          marker.style.background = 'rgba(245, 158, 11, 0.2)';
-        } else if (interaction === 'hover') {
-          marker.style.border = '2px solid rgba(59, 130, 246, 0.9)';
-          marker.style.background = 'rgba(59, 130, 246, 0.2)';
-        } else if (interaction === 'select') {
-          marker.style.border = '2px solid rgba(168, 85, 247, 0.9)';
-          marker.style.background = 'rgba(168, 85, 247, 0.2)';
-        } else {
-          marker.style.border = '2px solid rgba(34, 197, 94, 0.9)';
-          marker.style.background = 'rgba(34, 197, 94, 0.2)';
-        }
-
-        marker.style.left = `${rect.left - 4}px`;
-        marker.style.top = `${rect.top - 4}px`;
-        marker.style.width = `${rect.width + 8}px`;
-        marker.style.height = `${rect.height + 8}px`;
-        marker.style.opacity = '1';
-        marker.dataset.phase = interaction;
-      },
-      args: [selector, mode],
-    });
+          marker.dataset.phase = interaction;
+        },
+        args: [selector, mode],
+      });
+    } catch (err) {
+      // Marker display is cosmetic — don't break the test if the page
+      // is on a non-scriptable URL (e.g. chrome-extension://).
+      logAdapter('show-marker:skipped', {
+        tabId: this.tabId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      this.markerVisible = false;
+    }
   }
 
   private async hideInteractionMarker(): Promise<void> {
     if (!this.markerVisible) return;
     this.markerVisible = false;
 
-    await chrome.scripting.executeScript({
-      target: { tabId: this.tabId },
-      func: () => {
-        const marker = document.getElementById('__tmnc-interaction-marker');
-        if (!marker) return;
-        marker.style.opacity = '0';
-        window.setTimeout(() => marker.remove(), 180);
-      },
-    });
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: () => {
+          const marker = document.getElementById('__tmnc-interaction-marker');
+          if (!marker) return;
+          marker.style.opacity = '0';
+          window.setTimeout(() => marker.remove(), 180);
+        },
+      });
+    } catch (err) {
+      // Marker cleanup is cosmetic — don't break the test if the page
+      // navigated to a non-scriptable URL (e.g. chrome-extension://).
+      logAdapter('hide-marker:skipped', {
+        tabId: this.tabId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   async closeOtherTabs(): Promise<void> {

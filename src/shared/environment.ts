@@ -1,3 +1,7 @@
+function logEnv(step: string, details?: Record<string, unknown>): void {
+  console.log('[Environment]', step, details ?? {});
+}
+
 export type EnvironmentChoice = 'production' | 'staging' | 'qa' | 'custom';
 export type EnvironmentKind = 'local' | 'shared';
 
@@ -39,7 +43,11 @@ export function getUrlEnvironmentInfo(url: string | null): UrlEnvironmentInfo {
       hostname: parsed.hostname,
       isLocalEnvironment: LOCAL_ENV_HOSTS.has(parsed.hostname),
     };
-  } catch {
+  } catch (err) {
+    logEnv('url-parse:failed', {
+      url,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return {
       hostname: null,
       isLocalEnvironment: false,
