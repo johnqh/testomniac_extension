@@ -26,9 +26,21 @@ export class ChromeAdapter implements BrowserAdapter {
     status: number;
     contentType: string;
   }> = [];
+  /** Tab IDs that existed before the scan started — never close these. */
+  private preExistingTabIds = new Set<number>();
 
   constructor(tabId: number) {
     this.tabId = tabId;
+    // Snapshot all currently open tabs so closeOtherTabs only closes
+    // tabs that were opened during the scan.
+    chrome.tabs.query({}).then(tabs => {
+      for (const t of tabs) {
+        if (t.id != null) this.preExistingTabIds.add(t.id);
+      }
+      logAdapter('snapshot-tabs', {
+        preExistingCount: this.preExistingTabIds.size,
+      });
+    });
   }
 
   private async materializeSelector(selector: string): Promise<string> {
@@ -189,10 +201,46 @@ export class ChromeAdapter implements BrowserAdapter {
     url: string,
     options?: { waitUntil?: string; timeout?: number }
   ): Promise<void> {
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      logAdapter('goto:skipped-non-http', { url });
+      return;
+    }
     await this.ensureDebugger();
     await chrome.tabs.update(this.tabId, { url });
     await this.waitForTabLoad(options?.timeout || 30000);
     this.currentUrl = (await chrome.tabs.get(this.tabId)).url || url;
+    await this.neutralizeNonHttpLinks();
+  }
+
+  /**
+   * Neutralize non-http(s) links (mailto:, tel:, ftp:, etc.) on the current
+   * page so that clicking them during testing doesn't launch external apps.
+   */
+  private async neutralizeNonHttpLinks(): Promise<void> {
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: () => {
+          for (const a of document.querySelectorAll('a[href]')) {
+            const href = a.getAttribute('href') ?? '';
+            if (
+              href &&
+              !href.startsWith('http://') &&
+              !href.startsWith('https://') &&
+              !href.startsWith('/') &&
+              !href.startsWith('#') &&
+              !href.startsWith('?') &&
+              !href.startsWith('.')
+            ) {
+              a.setAttribute('data-tmnc-original-href', href);
+              a.setAttribute('href', '#');
+            }
+          }
+        },
+      });
+    } catch {
+      // Page may not be scriptable (e.g. chrome:// pages)
+    }
   }
 
   async click(selector: string, options?: { timeout?: number }): Promise<void> {
@@ -958,12 +1006,18 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async closeOtherTabs(): Promise<void> {
-    const tabs = await chrome.tabs.query({ currentWindow: true });
-    const otherTabIds = tabs
-      .filter(t => t.id !== this.tabId && t.id != null)
+    const tabs = await chrome.tabs.query({});
+    const newTabIds = tabs
+      .filter(
+        t =>
+          t.id != null &&
+          t.id !== this.tabId &&
+          !this.preExistingTabIds.has(t.id)
+      )
       .map(t => t.id!);
-    if (otherTabIds.length > 0) {
-      await chrome.tabs.remove(otherTabIds);
+    if (newTabIds.length > 0) {
+      logAdapter('close-new-tabs', { count: newTabIds.length, ids: newTabIds });
+      await chrome.tabs.remove(newTabIds);
     }
     // Re-focus the original tab
     await chrome.tabs.update(this.tabId, { active: true });

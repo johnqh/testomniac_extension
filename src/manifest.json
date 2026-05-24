@@ -11,7 +11,8 @@
     "scripting",
     "tabs",
     "debugger",
-    "sidePanel"
+    "sidePanel",
+    "alarms"
   ],
   "side_panel": {
     "default_path": "src/sidepanel/index.html"

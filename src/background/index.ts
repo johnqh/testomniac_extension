@@ -20,8 +20,44 @@ import {
   NoopExpertise,
 } from '@sudobility/testomniac_runner_service';
 
-const LOG = (...args: unknown[]) => console.log('[Testomniac]', ...args);
-const ERR = (...args: unknown[]) => console.error('[Testomniac]', ...args);
+// ---------------------------------------------------------------------------
+// Persistent log ring buffer — survives service worker restarts
+// ---------------------------------------------------------------------------
+const LOG_STORAGE_KEY = 'debugLog';
+const MAX_LOG_LINES = 500;
+let logBuffer: string[] = [];
+
+function persistLog() {
+  chrome.storage.local.set({ [LOG_STORAGE_KEY]: logBuffer }).catch(() => {});
+}
+
+function appendLog(level: string, args: unknown[]) {
+  const ts = new Date().toISOString();
+  const msg = args
+    .map(a => (typeof a === 'string' ? a : JSON.stringify(a)))
+    .join(' ');
+  const line = `${ts} [${level}] ${msg}`;
+  logBuffer.push(line);
+  if (logBuffer.length > MAX_LOG_LINES) {
+    logBuffer = logBuffer.slice(-MAX_LOG_LINES);
+  }
+  persistLog();
+}
+
+const LOG = (...args: unknown[]) => {
+  console.log('[Testomniac]', ...args);
+  appendLog('LOG', args);
+};
+const ERR = (...args: unknown[]) => {
+  console.error('[Testomniac]', ...args);
+  appendLog('ERR', args);
+};
+
+// Restore log buffer from previous worker lifetime
+chrome.storage.local.get([LOG_STORAGE_KEY]).then(stored => {
+  const saved = stored[LOG_STORAGE_KEY];
+  if (Array.isArray(saved)) logBuffer = saved;
+});
 
 LOG('Background service worker starting...');
 
@@ -438,6 +474,7 @@ async function runScanSession(
   scanState.scanId = runId;
   scanState.targetUrl = url;
   scanState.runnerInstanceId = runnerInstanceId;
+  startKeepalive();
   scanState.runnerInstanceName = runnerInstanceName;
   scanState.environmentKind =
     environment?.kind ?? scanState.environmentKind ?? null;
@@ -724,6 +761,7 @@ async function runScanSession(
     });
     if (!scanState.isPaused) {
       scanState.isRunning = false;
+      stopKeepalive();
     }
     sendProgressToSidePanel();
     LOG('Scan finished, isRunning=', scanState.isRunning);
@@ -850,10 +888,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     scanState.isComplete = true;
     scanState.phase = 'stopped';
     activeRunPromise = null;
+    stopKeepalive();
     addEvent('stopped', 'Scan stopped by user');
     sendResponse({ ok: true });
   } else if (message.type === 'GET_STATUS') {
     sendResponse({ ...scanState });
+  } else if (message.type === 'GET_DEBUG_LOG') {
+    sendResponse({ ok: true, log: logBuffer });
   } else if (message.type === 'SET_AUTH_TOKEN') {
     chrome.storage.session.set({ firebaseToken: message.token || null });
     sendResponse({ ok: true });
@@ -877,6 +918,36 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
+// ---------------------------------------------------------------------------
+// Service worker keepalive
+// ---------------------------------------------------------------------------
+// Chrome MV3 terminates idle service workers after ~30s and enforces a 5-min
+// hard limit.  During an active scan the worker must stay alive.  We use
+// chrome.alarms (minimum 30s interval) to periodically nudge the worker and
+// extend its lifetime.
+
+const KEEPALIVE_ALARM = 'testomniac-keepalive';
+
+function startKeepalive() {
+  chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.5 });
+  LOG('Keepalive alarm started');
+}
+
+function stopKeepalive() {
+  chrome.alarms.clear(KEEPALIVE_ALARM);
+  LOG('Keepalive alarm stopped');
+}
+
+chrome.alarms.onAlarm.addListener(alarm => {
+  if (alarm.name === KEEPALIVE_ALARM) {
+    if (scanState.isRunning) {
+      LOG('Keepalive tick — scan active');
+    } else {
+      stopKeepalive();
+    }
+  }
+});
+
 // Open side panel when extension icon is clicked
 chrome.action.onClicked.addListener(async tab => {
   LOG('Extension icon clicked, opening side panel for tab', tab.id);
@@ -885,9 +956,32 @@ chrome.action.onClicked.addListener(async tab => {
   }
 });
 
-// Load config and restore persisted scan state on startup
+// Load config and restore persisted scan state on startup.
+// If the service worker was killed mid-scan, auto-resume.
 void Promise.all([
   loadConfig(),
   restoreScanState(),
   ensureExtensionInstanceId(),
-]);
+]).then(() => {
+  if (
+    (scanState.isRunning || scanState.isPaused) &&
+    !scanState.isComplete &&
+    scanState.scanId &&
+    scanState.targetUrl &&
+    !activeRunPromise
+  ) {
+    LOG('Service worker restarted with active scan — auto-resuming', {
+      scanId: scanState.scanId,
+      targetUrl: scanState.targetUrl,
+      phase: scanState.phase,
+    });
+    activeRunPromise = runScanSession(scanState.targetUrl, scanState.scanId, {
+      environment: {
+        kind: scanState.environmentKind ?? undefined,
+        label: scanState.environmentLabel ?? undefined,
+        hostname: scanState.environmentHostname ?? undefined,
+      },
+      resumeExisting: true,
+    });
+  }
+});

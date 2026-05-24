@@ -451,6 +451,7 @@ export function SidePanel() {
 
   // Login credential state
   const [continueWithLogin, setContinueWithLogin] = useState(false);
+  const [quickScanEnabled, setQuickScanEnabled] = useState(false);
   const [credentials, setCredentials] = useState<EntityCredentialOption[]>([]);
   const [loadingCredentials, setLoadingCredentials] = useState(false);
   const [selectedCredentialId, setSelectedCredentialId] = useState<string>('');
@@ -866,6 +867,7 @@ export function SidePanel() {
         ownedByUserId: user?.uid,
         environmentLabel: resolvedEnvironmentLabel,
         environmentKind,
+        ...(quickScanEnabled ? { quickScan: true } : {}),
       };
       if (continueWithLogin) {
         scanBody.continueWithLogin = true;
@@ -951,6 +953,7 @@ export function SidePanel() {
     continueWithLogin,
     selectedCredentialId,
     loginUrl,
+    quickScanEnabled,
   ]);
 
   // Auto-scroll event log
@@ -1334,7 +1337,7 @@ export function SidePanel() {
   ];
 
   return (
-    <div className='p-3 space-y-3 text-sm'>
+    <div className='p-3 space-y-3 text-sm flex flex-col h-screen'>
       {/* Header */}
       <div className='flex items-center justify-between'>
         <div className='font-semibold text-gray-900 text-base'>
@@ -1537,6 +1540,21 @@ export function SidePanel() {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* Quick Scan */}
+              <div>
+                <label className='flex items-center gap-2 text-[11px] font-medium text-gray-700 cursor-pointer'>
+                  <input
+                    type='checkbox'
+                    checked={quickScanEnabled}
+                    onChange={e => setQuickScanEnabled(e.target.checked)}
+                  />
+                  Quick scan
+                </label>
+                <p className='ml-5 text-[10px] text-gray-500'>
+                  Skip hover interactions on linked elements
+                </p>
               </div>
 
               {/* Continue with login */}
@@ -1932,38 +1950,9 @@ export function SidePanel() {
 
       {/* Tab content */}
       {(isScanning || progress.isComplete) && (
-        <div className='rounded-md border border-gray-200 overflow-hidden'>
+        <div className='rounded-md border border-gray-200 overflow-hidden min-h-0 flex-1 flex flex-col'>
           {resultTab === 'overview' && (
-            <>
-              {(progress.aiSummary || expertiseSummaryEntries.length > 0) && (
-                <div className='border-b border-gray-200 bg-white'>
-                  {progress.aiSummary && (
-                    <div className='px-3 py-2 text-[11px] leading-5 text-gray-700'>
-                      {progress.aiSummary}
-                    </div>
-                  )}
-                  {expertiseSummaryEntries.length > 0 && (
-                    <div className='px-3 pb-2 grid grid-cols-2 gap-2'>
-                      {expertiseSummaryEntries.map(([name, counts]) => (
-                        <div
-                          key={name}
-                          className='rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5'
-                        >
-                          <div className='text-[10px] font-medium uppercase tracking-wide text-gray-500'>
-                            {name}
-                          </div>
-                          <div className='mt-1 text-[11px]'>
-                            <span className='text-red-600'>
-                              {counts.errors} error
-                              {counts.errors === 1 ? '' : 's'}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className='flex-1 overflow-y-auto'>
               {progress.currentPageUrl && (
                 <div className='bg-gray-50 px-2 py-1 border-b border-gray-200 flex items-center justify-between'>
                   <span className='text-[10px] font-medium text-gray-500'>
@@ -1986,13 +1975,42 @@ export function SidePanel() {
                   Waiting for screenshot...
                 </div>
               )}
-            </>
+              {(progress.aiSummary || expertiseSummaryEntries.length > 0) && (
+                <div className='border-t border-gray-200 bg-white'>
+                  {progress.aiSummary && (
+                    <div className='px-3 py-2 text-[11px] leading-5 text-gray-700'>
+                      {progress.aiSummary}
+                    </div>
+                  )}
+                  {expertiseSummaryEntries.length > 0 && (
+                    <div className='px-3 py-2 grid grid-cols-2 gap-2'>
+                      {expertiseSummaryEntries.map(([name, counts]) => (
+                        <div
+                          key={name}
+                          className='rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5'
+                        >
+                          <div className='text-[10px] font-medium uppercase tracking-wide text-gray-500'>
+                            {name}
+                          </div>
+                          <div className='mt-1 text-[11px]'>
+                            <span className='text-red-600'>
+                              {counts.errors} error
+                              {counts.errors === 1 ? '' : 's'}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
           {resultTab === 'map' && (
             <div
               ref={eventLogRef}
-              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+              className='flex-1 overflow-y-auto font-mono text-[10px]'
             >
               {(navigationMap?.discoveredPages ?? []).map(page => {
                 const visit = navigationMap?.pageVisits.find(
@@ -2027,7 +2045,7 @@ export function SidePanel() {
           {resultTab === 'issues' && (
             <div
               ref={eventLogRef}
-              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+              className='flex-1 overflow-y-auto font-mono text-[10px]'
             >
               {findingRows.map(finding => (
                 <div
@@ -2057,7 +2075,7 @@ export function SidePanel() {
           {resultTab === 'coverage' && (
             <div
               ref={eventLogRef}
-              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+              className='flex-1 overflow-y-auto font-mono text-[10px]'
             >
               {runStructure && (
                 <div className='border-b border-gray-100 px-2 py-1.5 bg-gray-50'>
@@ -2162,7 +2180,7 @@ export function SidePanel() {
           {resultTab === 'events' && (
             <div
               ref={eventLogRef}
-              className='max-h-[300px] overflow-y-auto font-mono text-[10px]'
+              className='flex-1 overflow-y-auto font-mono text-[10px]'
             >
               {enrichedEventRows.map(
                 ({ key, event, testInteractionRunId, context }) => (
