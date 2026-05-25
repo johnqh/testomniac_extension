@@ -5,19 +5,14 @@ const STORAGE_PREFIX = 'dedup:';
 /**
  * DedupStore backed by chrome.storage.local.
  *
- * All data lives in chrome.storage.local — NOT in memory. Each `has()`
- * and `add()` call reads/writes storage directly. This keeps the
- * service worker's heap small regardless of how many dedup keys
- * accumulate during a long scan.
- *
- * A small write buffer batches `add()` calls to reduce storage I/O.
- * The buffer is flushed every 2 seconds or when it reaches 50 entries.
+ * Collections are stored as objects (`{ key: 1 }`) for O(1) lookups.
+ * Writes are batched in a small pending buffer and flushed every 2s
+ * or when the buffer reaches 50 entries.
  */
 export class ChromeStorageDedupStore implements DedupStore {
   private static readonly FLUSH_INTERVAL_MS = 2000;
   private static readonly FLUSH_BATCH_SIZE = 50;
 
-  /** Pending adds not yet flushed to storage. Keyed by collection. */
   private pendingAdds = new Map<string, Set<string>>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -26,16 +21,18 @@ export class ChromeStorageDedupStore implements DedupStore {
   }
 
   async has(collection: string, key: string): Promise<boolean> {
-    // Check pending adds first (not yet flushed to storage)
+    // Check pending buffer first
     if (this.pendingAdds.get(collection)?.has(key)) return true;
 
-    // Read from storage
-    const storageKey = this.storageKey(collection);
-    const stored = await chrome.storage.local.get([storageKey]);
-    const arr: string[] = Array.isArray(stored[storageKey])
-      ? stored[storageKey]
-      : [];
-    return arr.includes(key);
+    // O(1) property lookup on the stored object
+    const sk = this.storageKey(collection);
+    const stored = await chrome.storage.local.get([sk]);
+    const obj = stored[sk];
+    return (
+      obj != null &&
+      typeof obj === 'object' &&
+      (obj as Record<string, number>)[key] === 1
+    );
   }
 
   async add(collection: string, key: string): Promise<void> {
@@ -46,15 +43,13 @@ export class ChromeStorageDedupStore implements DedupStore {
     }
     pending.add(key);
 
-    // Flush if batch is large enough
-    let totalPending = 0;
-    for (const s of this.pendingAdds.values()) totalPending += s.size;
-    if (totalPending >= ChromeStorageDedupStore.FLUSH_BATCH_SIZE) {
+    let total = 0;
+    for (const s of this.pendingAdds.values()) total += s.size;
+    if (total >= ChromeStorageDedupStore.FLUSH_BATCH_SIZE) {
       await this.flush();
       return;
     }
 
-    // Otherwise schedule a debounced flush
     if (!this.flushTimer) {
       this.flushTimer = setTimeout(() => {
         this.flushTimer = null;
@@ -73,28 +68,26 @@ export class ChromeStorageDedupStore implements DedupStore {
     this.pendingAdds.clear();
     if (entries.length === 0) return;
 
-    // Read current values, merge pending, write back
     const keys = entries.map(([c]) => this.storageKey(c));
     const stored: Record<string, unknown> = await chrome.storage.local
       .get(keys)
       .catch(() => ({}) as Record<string, unknown>);
-    const updates: Record<string, string[]> = {};
+    const updates: Record<string, Record<string, number>> = {};
 
     for (const [collection, pending] of entries) {
-      const storageKey = this.storageKey(collection);
-      const raw = stored[storageKey];
-      const existing: string[] = Array.isArray(raw) ? (raw as string[]) : [];
-      const merged = new Set(existing);
-      for (const k of pending) merged.add(k);
-      updates[storageKey] = [...merged];
+      const sk = this.storageKey(collection);
+      const existing =
+        stored[sk] != null && typeof stored[sk] === 'object'
+          ? (stored[sk] as Record<string, number>)
+          : {};
+      const merged = { ...existing };
+      for (const k of pending) merged[k] = 1;
+      updates[sk] = merged;
     }
 
-    await chrome.storage.local.set(updates).catch(() => {
-      // Best effort — storage may be full
-    });
+    await chrome.storage.local.set(updates).catch(() => {});
   }
 
-  /** Clear all collections (call when starting a new scan). */
   async clear(): Promise<void> {
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
@@ -102,7 +95,6 @@ export class ChromeStorageDedupStore implements DedupStore {
     }
     this.pendingAdds.clear();
 
-    // Remove all dedup keys from storage
     const all = await chrome.storage.local.get(null);
     const dedupKeys = Object.keys(all).filter(k =>
       k.startsWith(STORAGE_PREFIX)
