@@ -11,7 +11,7 @@ function logAdapter(step: string, details?: Record<string, unknown>): void {
  * Uses chrome.tabs, chrome.scripting, and chrome.debugger APIs.
  */
 export class ChromeAdapter implements BrowserAdapter {
-  readonly tabId: number;
+  tabId: number;
   private currentUrl: string = '';
   private debuggerAttached: boolean = false;
   private markerVisible: boolean = false;
@@ -690,6 +690,62 @@ export class ChromeAdapter implements BrowserAdapter {
         args: [resolvedSelector, value],
       });
     });
+  }
+
+  // --- Popup / multi-tab support ---
+
+  getCurrentTabId(): number {
+    return this.tabId;
+  }
+
+  async waitForNewTab(timeoutMs = 10000): Promise<number | null> {
+    return new Promise<number | null>(resolve => {
+      let settled = false;
+      const listener = (tab: chrome.tabs.Tab) => {
+        if (settled) return;
+        if (tab.id != null && !this.preExistingTabIds.has(tab.id)) {
+          settled = true;
+          chrome.tabs.onCreated.removeListener(listener);
+          clearTimeout(timer);
+          resolve(tab.id);
+        }
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        chrome.tabs.onCreated.removeListener(listener);
+        resolve(null);
+      }, timeoutMs);
+      chrome.tabs.onCreated.addListener(listener);
+    });
+  }
+
+  async switchToTab(tabId: number): Promise<void> {
+    // Tear down debugger on current tab
+    if (this.debuggerEventListener) {
+      chrome.debugger.onEvent.removeListener(this.debuggerEventListener);
+      this.debuggerEventListener = null;
+      this.debuggerEventsBound = false;
+    }
+    if (this.debuggerAttached) {
+      try {
+        await chrome.debugger.detach({ tabId: this.tabId });
+      } catch {
+        // Already detached
+      }
+      this.debuggerAttached = false;
+    }
+
+    // Switch to new tab
+    this.tabId = tabId;
+    this.consoleLogBuffer.length = 0;
+    this.networkLogBuffer.length = 0;
+    this.requestMetadata.clear();
+
+    // Set up debugger on the new tab
+    await this.ensureDebugger();
+    this.currentUrl = (await chrome.tabs.get(this.tabId)).url || '';
+    logAdapter('switchToTab', { tabId, url: this.currentUrl });
   }
 
   async close(): Promise<void> {
