@@ -286,13 +286,8 @@ const initialProgress: ScanProgress = {
   events: [],
 };
 
-type ResultTab =
-  | 'overview'
-  | 'map'
-  | 'coverage'
-  | 'issues'
-  | 'events'
-  | 'scenarios';
+type ResultTab = 'overview' | 'map' | 'coverage' | 'issues' | 'events';
+type AppView = 'home' | 'scenarios';
 
 const EXPERTISE_OPTIONS: ExpertiseOption[] = [
   { slug: 'tester', label: 'Tester', required: true },
@@ -423,6 +418,7 @@ export function SidePanel() {
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
+  const [appView, setAppView] = useState<AppView>('home');
   const [showSettings, setShowSettings] = useState(false);
   const [settingsApiUrl, setSettingsApiUrl] = useState('');
   const [settingsApiKey, setSettingsApiKey] = useState('');
@@ -476,7 +472,8 @@ export function SidePanel() {
 
   // Login credential state
   const [continueWithLogin, setContinueWithLogin] = useState(false);
-  const [quickScanEnabled, setQuickScanEnabled] = useState(false);
+  type ScanMode = 'full' | 'partial' | 'minimum';
+  const [scanMode, setScanMode] = useState<ScanMode>('full');
   const [credentials, setCredentials] = useState<EntityCredentialOption[]>([]);
   const [loadingCredentials, setLoadingCredentials] = useState(false);
   const [selectedCredentialId, setSelectedCredentialId] = useState<string>('');
@@ -892,7 +889,7 @@ export function SidePanel() {
         ownedByUserId: user?.uid,
         environmentLabel: resolvedEnvironmentLabel,
         environmentKind,
-        ...(quickScanEnabled ? { quickScan: true } : {}),
+        ...(scanMode !== 'full' ? { scanMode } : {}),
       };
       if (continueWithLogin) {
         scanBody.continueWithLogin = true;
@@ -978,7 +975,7 @@ export function SidePanel() {
     continueWithLogin,
     selectedCredentialId,
     loginUrl,
-    quickScanEnabled,
+    scanMode,
   ]);
 
   // Auto-scroll event log
@@ -1189,8 +1186,8 @@ export function SidePanel() {
   }, [token, runSummary?.runnerId]);
 
   useEffect(() => {
-    if (resultTab === 'scenarios') void fetchScenarios();
-  }, [resultTab, fetchScenarios]);
+    if (appView === 'scenarios') void fetchScenarios();
+  }, [appView, fetchScenarios]);
 
   const handleCreateScenario = useCallback(async () => {
     const runnerId = runSummary?.runnerId;
@@ -1459,7 +1456,7 @@ export function SidePanel() {
     { value: '__create__', label: '+ Create Product' },
   ];
 
-  return (
+  const homeView = (
     <div className='p-3 space-y-3 text-sm flex flex-col h-screen'>
       {/* Header */}
       <div className='flex items-center justify-between'>
@@ -1472,10 +1469,21 @@ export function SidePanel() {
           </span>
           <button
             onClick={() => setShowSettings(s => !s)}
-            className={`text-xs font-medium ${showSettings ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+            className={`${showSettings ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
             title='Settings'
           >
-            Settings
+            <svg
+              xmlns='http://www.w3.org/2000/svg'
+              viewBox='0 0 20 20'
+              fill='currentColor'
+              className='w-4 h-4'
+            >
+              <path
+                fillRule='evenodd'
+                d='M7.84 1.804A1 1 0 0 1 8.82 1h2.36a1 1 0 0 1 .98.804l.331 1.652a6.993 6.993 0 0 1 1.929 1.115l1.598-.54a1 1 0 0 1 1.186.447l1.18 2.044a1 1 0 0 1-.205 1.251l-1.267 1.113a7.047 7.047 0 0 1 0 2.228l1.267 1.113a1 1 0 0 1 .206 1.25l-1.18 2.045a1 1 0 0 1-1.187.447l-1.598-.54a6.993 6.993 0 0 1-1.929 1.115l-.33 1.652a1 1 0 0 1-.98.804H8.82a1 1 0 0 1-.98-.804l-.331-1.652a6.993 6.993 0 0 1-1.929-1.115l-1.598.54a1 1 0 0 1-1.186-.447l-1.18-2.044a1 1 0 0 1 .205-1.251l1.267-1.114a7.05 7.05 0 0 1 0-2.227L1.821 7.773a1 1 0 0 1-.206-1.25l1.18-2.045a1 1 0 0 1 1.187-.447l1.598.54A6.992 6.992 0 0 1 7.51 3.456l.33-1.652ZM10 13a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'
+                clipRule='evenodd'
+              />
+            </svg>
           </button>
           {!isScanning && (
             <button
@@ -1665,18 +1673,37 @@ export function SidePanel() {
                 </div>
               </div>
 
-              {/* Quick Scan */}
+              {/* Scan Mode */}
               <div>
-                <label className='flex items-center gap-2 text-[11px] font-medium text-gray-700 cursor-pointer'>
-                  <input
-                    type='checkbox'
-                    checked={quickScanEnabled}
-                    onChange={e => setQuickScanEnabled(e.target.checked)}
-                  />
-                  Quick scan
-                </label>
-                <p className='ml-5 text-[10px] text-gray-500'>
-                  Skip hover interactions on linked elements
+                <div className='text-[11px] font-medium text-gray-700 mb-1'>
+                  Scan depth
+                </div>
+                <div className='flex gap-1'>
+                  {(
+                    [
+                      { value: 'full', label: 'Full' },
+                      { value: 'partial', label: 'Partial' },
+                      { value: 'minimum', label: 'Minimum' },
+                    ] as const
+                  ).map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setScanMode(opt.value)}
+                      className={`flex-1 text-[10px] font-medium py-1 rounded border transition-colors ${
+                        scanMode === opt.value
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <p className='text-[10px] text-gray-500 mt-1'>
+                  {scanMode === 'full' &&
+                    'Run all interactions including hover'}
+                  {scanMode === 'partial' && 'Skip hover interactions'}
+                  {scanMode === 'minimum' && 'Navigation only — fastest'}
                 </p>
               </div>
 
@@ -1871,22 +1898,32 @@ export function SidePanel() {
         </div>
       )}
 
-      {/* Test Current Page Button */}
+      {/* Test Current Page Button + Scenarios */}
       {activeTabUrl && !isScanning && (
-        <button
-          onClick={handleTestCurrentPage}
-          disabled={
-            isSubmitting ||
-            !selectedProductId ||
-            !selectedEntityId ||
-            !isEnvironmentSelectionValid
-          }
-          className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
-        >
-          {isSubmitting
-            ? 'Submitting...'
-            : `Test ${new URL(activeTabUrl).hostname}`}
-        </button>
+        <div className='space-y-1.5'>
+          <button
+            onClick={handleTestCurrentPage}
+            disabled={
+              isSubmitting ||
+              !selectedProductId ||
+              !selectedEntityId ||
+              !isEnvironmentSelectionValid
+            }
+            className='w-full py-2.5 px-3 text-sm font-medium rounded-md bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white truncate'
+          >
+            {isSubmitting
+              ? 'Submitting...'
+              : `Test ${new URL(activeTabUrl).hostname}`}
+          </button>
+          {runSummary?.runnerId && (
+            <button
+              onClick={() => setAppView('scenarios')}
+              className='w-full py-1.5 px-3 text-xs font-medium rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50'
+            >
+              Scenarios
+            </button>
+          )}
+        </div>
       )}
 
       {/* Scan controls when active */}
@@ -2054,7 +2091,6 @@ export function SidePanel() {
               { key: 'issues', label: 'Errors' },
               { key: 'coverage', label: 'Coverage' },
               { key: 'events', label: 'All Events' },
-              { key: 'scenarios', label: 'Scenarios' },
             ] as const
           ).map(tab => (
             <button
@@ -2301,93 +2337,6 @@ export function SidePanel() {
             </div>
           )}
 
-          {resultTab === 'scenarios' && (
-            <div className='flex-1 overflow-y-auto'>
-              <div className='p-2 space-y-2'>
-                <button
-                  onClick={() => setShowNewScenarioForm(v => !v)}
-                  className='w-full text-left text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 rounded-md border border-dashed border-blue-300 hover:bg-blue-50'
-                >
-                  {showNewScenarioForm ? '- Cancel' : '+ New Scenario'}
-                </button>
-
-                {showNewScenarioForm && (
-                  <div className='space-y-1.5 rounded-md border border-gray-200 bg-gray-50 p-2'>
-                    <input
-                      type='text'
-                      placeholder='Title (e.g., Checkout flow)'
-                      value={newScenarioTitle}
-                      onChange={e => setNewScenarioTitle(e.target.value)}
-                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
-                    />
-                    <input
-                      type='text'
-                      placeholder='Starting path (e.g., /store)'
-                      value={newScenarioPath}
-                      onChange={e => setNewScenarioPath(e.target.value)}
-                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
-                    />
-                    <textarea
-                      placeholder='Prompt (e.g., Add item to cart and complete checkout)'
-                      value={newScenarioPrompt}
-                      onChange={e => setNewScenarioPrompt(e.target.value)}
-                      rows={3}
-                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded resize-none'
-                    />
-                    <button
-                      onClick={handleCreateScenario}
-                      disabled={creatingScenario || !newScenarioTitle.trim()}
-                      className='w-full text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 rounded'
-                    >
-                      {creatingScenario ? 'Creating...' : 'Create'}
-                    </button>
-                  </div>
-                )}
-
-                {loadingScenarios && (
-                  <div className='text-center text-xs text-gray-400 py-4'>
-                    Loading scenarios...
-                  </div>
-                )}
-
-                {!loadingScenarios && scenarios.length === 0 && (
-                  <div className='text-center text-xs text-gray-400 py-4'>
-                    No scenarios yet
-                  </div>
-                )}
-
-                {scenarios.map(s => (
-                  <div
-                    key={s.id}
-                    className='rounded-md border border-gray-200 bg-white px-2.5 py-2 flex items-center justify-between'
-                  >
-                    <div className='min-w-0 flex-1'>
-                      <div className='text-xs font-medium text-gray-800 truncate'>
-                        {s.title}
-                      </div>
-                      <div className='text-[10px] text-gray-400 truncate'>
-                        {s.startingPath}
-                        {s.prompt ? ` — ${s.prompt}` : ''}
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => handleRunScenario(s)}
-                      disabled={isScanning || runningScenarioId != null}
-                      className='ml-2 shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white bg-green-500 hover:bg-green-600 disabled:opacity-40'
-                      title='Run scenario'
-                    >
-                      {runningScenarioId === s.id ? (
-                        <span className='text-[10px]'>...</span>
-                      ) : (
-                        <span className='text-sm'>&#9654;</span>
-                      )}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {resultTab === 'events' && (
             <div
               ref={eventLogRef}
@@ -2461,4 +2410,108 @@ export function SidePanel() {
       )}
     </div>
   );
+
+  // =========================================================================
+  // Scenarios View
+  // =========================================================================
+
+  const scenariosView = (
+    <div className='flex flex-col h-full p-3 space-y-3'>
+      <div className='flex items-center justify-between'>
+        <button
+          onClick={() => setAppView('home')}
+          className='text-xs text-blue-600 hover:text-blue-700 font-medium'
+        >
+          &larr; Back
+        </button>
+        <span className='text-sm font-semibold text-gray-800'>Scenarios</span>
+        <div className='w-10' />
+      </div>
+
+      <button
+        onClick={() => setShowNewScenarioForm(v => !v)}
+        className='w-full text-left text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 rounded-md border border-dashed border-blue-300 hover:bg-blue-50'
+      >
+        {showNewScenarioForm ? '- Cancel' : '+ New Scenario'}
+      </button>
+
+      {showNewScenarioForm && (
+        <div className='space-y-1.5 rounded-md border border-gray-200 bg-gray-50 p-2'>
+          <input
+            type='text'
+            placeholder='Title (e.g., Checkout flow)'
+            value={newScenarioTitle}
+            onChange={e => setNewScenarioTitle(e.target.value)}
+            className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
+          />
+          <input
+            type='text'
+            placeholder='Starting path (e.g., /store)'
+            value={newScenarioPath}
+            onChange={e => setNewScenarioPath(e.target.value)}
+            className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
+          />
+          <textarea
+            placeholder='Prompt (e.g., Add item to cart and complete checkout)'
+            value={newScenarioPrompt}
+            onChange={e => setNewScenarioPrompt(e.target.value)}
+            rows={3}
+            className='w-full text-xs px-2 py-1 border border-gray-300 rounded resize-none'
+          />
+          <button
+            onClick={handleCreateScenario}
+            disabled={creatingScenario || !newScenarioTitle.trim()}
+            className='w-full text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 rounded'
+          >
+            {creatingScenario ? 'Creating...' : 'Create'}
+          </button>
+        </div>
+      )}
+
+      {loadingScenarios && (
+        <div className='text-center text-xs text-gray-400 py-4'>
+          Loading scenarios...
+        </div>
+      )}
+
+      {!loadingScenarios && scenarios.length === 0 && !showNewScenarioForm && (
+        <div className='text-center text-xs text-gray-400 py-8'>
+          No scenarios yet
+        </div>
+      )}
+
+      <div className='flex-1 overflow-y-auto space-y-2'>
+        {scenarios.map(s => (
+          <div
+            key={s.id}
+            className='rounded-md border border-gray-200 bg-white px-2.5 py-2 flex items-center justify-between'
+          >
+            <div className='min-w-0 flex-1'>
+              <div className='text-xs font-medium text-gray-800 truncate'>
+                {s.title}
+              </div>
+              <div className='text-[10px] text-gray-400 truncate'>
+                {s.startingPath}
+                {s.prompt ? ` — ${s.prompt}` : ''}
+              </div>
+            </div>
+            <button
+              onClick={() => handleRunScenario(s)}
+              disabled={isScanning || runningScenarioId != null}
+              className='ml-2 shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white bg-green-500 hover:bg-green-600 disabled:opacity-40'
+              title='Run scenario'
+            >
+              {runningScenarioId === s.id ? (
+                <span className='text-[10px]'>...</span>
+              ) : (
+                <span className='text-sm'>&#9654;</span>
+              )}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return appView === 'scenarios' ? scenariosView : homeView;
 }
