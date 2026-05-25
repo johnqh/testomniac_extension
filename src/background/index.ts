@@ -19,6 +19,9 @@ import {
   PerformanceExpertise,
   NoopExpertise,
 } from '@sudobility/testomniac_runner_service';
+import { ChromeStorageDedupStore } from '../storage/ChromeStorageDedupStore';
+
+const dedupStore = new ChromeStorageDedupStore();
 
 // ---------------------------------------------------------------------------
 // Persistent log ring buffer — survives service worker restarts
@@ -750,7 +753,8 @@ async function runScanSession(
       },
       api,
       expertises,
-      eventHandler
+      eventHandler,
+      { dedupStore }
     );
     LOG(`runTestRun returned:`, result);
   } catch (err: unknown) {
@@ -799,6 +803,7 @@ async function startScan(
     loginUrl?: string;
   }
 ) {
+  await dedupStore.clear();
   activeRunPromise = runScanSession(url, runId, { environment, loginOptions });
   await activeRunPromise;
 }
