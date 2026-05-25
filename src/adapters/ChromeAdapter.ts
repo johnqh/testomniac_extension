@@ -19,6 +19,9 @@ export class ChromeAdapter implements BrowserAdapter {
   private consoleHandlers = new Set<(...args: unknown[]) => void>();
   private responseHandlers = new Set<(...args: unknown[]) => void>();
   private requestMetadata = new Map<string, { method: string; url: string }>();
+  private static readonly MAX_CONSOLE_BUFFER = 1000;
+  private static readonly MAX_NETWORK_BUFFER = 1000;
+  private static readonly MAX_REQUEST_METADATA = 500;
   private consoleLogBuffer: string[] = [];
   private networkLogBuffer: Array<{
     method: string;
@@ -26,6 +29,13 @@ export class ChromeAdapter implements BrowserAdapter {
     status: number;
     contentType: string;
   }> = [];
+  private debuggerEventListener:
+    | ((
+        source: chrome.debugger.Debuggee,
+        method: string,
+        params?: object
+      ) => void)
+    | null = null;
   /** Tab IDs that existed before the scan started — never close these. */
   private preExistingTabIds = new Set<number>();
 
@@ -405,11 +415,18 @@ export class ChromeAdapter implements BrowserAdapter {
       await this.withInteractionMarker(resolvedSelector, 'hover', async () => {
         await this.ensureDebugger();
         // Move mouse to element (triggers mouseenter + mouseover on the page)
-        await chrome.debugger.sendCommand(
-          { tabId: this.tabId },
-          'Input.dispatchMouseEvent',
-          { type: 'mouseMoved', x, y }
-        );
+        try {
+          await chrome.debugger.sendCommand(
+            { tabId: this.tabId },
+            'Input.dispatchMouseEvent',
+            { type: 'mouseMoved', x, y }
+          );
+        } catch (err) {
+          logAdapter('hover:failed', {
+            tabId: this.tabId,
+            error: String(err),
+          });
+        }
       });
       return;
     }
@@ -559,58 +576,82 @@ export class ChromeAdapter implements BrowserAdapter {
   }): Promise<Uint8Array> {
     await this.ensureAccessiblePage();
     await this.ensureDebugger();
-    const result = (await chrome.debugger.sendCommand(
-      { tabId: this.tabId },
-      'Page.captureScreenshot',
-      {
-        format: (options?.type as 'jpeg' | 'png') || 'jpeg',
-        quality: options?.quality || 72,
-      }
-    )) as { data?: string };
+    try {
+      const result = (await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Page.captureScreenshot',
+        {
+          format: (options?.type as 'jpeg' | 'png') || 'jpeg',
+          quality: options?.quality || 72,
+        }
+      )) as { data?: string };
 
-    const base64 = result.data || '';
-    const binary = atob(base64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
+      const base64 = result.data || '';
+      if (!base64) return new Uint8Array(0);
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch (err) {
+      logAdapter('screenshot:failed', {
+        tabId: this.tabId,
+        error: String(err),
+      });
+      return new Uint8Array(0);
     }
-    return bytes;
   }
 
   async setViewport(width: number, height: number): Promise<void> {
     await this.ensureDebugger();
-    await chrome.debugger.sendCommand(
-      { tabId: this.tabId },
-      'Emulation.setDeviceMetricsOverride',
-      {
-        width,
-        height,
-        deviceScaleFactor: 1,
-        mobile: false,
-      }
-    );
+    try {
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Emulation.setDeviceMetricsOverride',
+        {
+          width,
+          height,
+          deviceScaleFactor: 1,
+          mobile: false,
+        }
+      );
+    } catch (err) {
+      logAdapter('setViewport:failed', {
+        tabId: this.tabId,
+        error: String(err),
+      });
+    }
   }
 
   async pressKey(key: string): Promise<void> {
     await this.withActiveElementMarker('keyboard', async () => {
       await this.ensureAccessiblePage();
       await this.ensureDebugger();
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchKeyEvent',
-        {
-          type: 'keyDown',
+      try {
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchKeyEvent',
+          {
+            type: 'keyDown',
+            key,
+          }
+        );
+        await chrome.debugger.sendCommand(
+          { tabId: this.tabId },
+          'Input.dispatchKeyEvent',
+          {
+            type: 'keyUp',
+            key,
+          }
+        );
+      } catch (err) {
+        logAdapter('pressKey:failed', {
+          tabId: this.tabId,
           key,
-        }
-      );
-      await chrome.debugger.sendCommand(
-        { tabId: this.tabId },
-        'Input.dispatchKeyEvent',
-        {
-          type: 'keyUp',
-          key,
-        }
-      );
+          error: String(err),
+        });
+      }
     });
   }
 
@@ -652,6 +693,11 @@ export class ChromeAdapter implements BrowserAdapter {
   }
 
   async close(): Promise<void> {
+    if (this.debuggerEventListener) {
+      chrome.debugger.onEvent.removeListener(this.debuggerEventListener);
+      this.debuggerEventListener = null;
+      this.debuggerEventsBound = false;
+    }
     if (this.debuggerAttached) {
       try {
         await chrome.debugger.detach({ tabId: this.tabId });
@@ -665,7 +711,16 @@ export class ChromeAdapter implements BrowserAdapter {
       this.debuggerAttached = false;
     }
     this.requestMetadata.clear();
-    await chrome.tabs.remove(this.tabId);
+    this.consoleLogBuffer.length = 0;
+    this.networkLogBuffer.length = 0;
+    try {
+      await chrome.tabs.remove(this.tabId);
+    } catch (err) {
+      logAdapter('tab-remove:skipped', {
+        tabId: this.tabId,
+        error: String(err),
+      });
+    }
   }
 
   on(
@@ -741,17 +796,30 @@ export class ChromeAdapter implements BrowserAdapter {
       this.debuggerAttached = true;
     }
     this.bindDebuggerEvents();
-    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable');
-    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable');
-    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable');
-    await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable');
+    try {
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Runtime.enable'
+      );
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable');
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Network.enable'
+      );
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable');
+    } catch (err) {
+      logAdapter('debugger-enable:failed', {
+        tabId: this.tabId,
+        error: String(err),
+      });
+    }
   }
 
   private bindDebuggerEvents(): void {
     if (this.debuggerEventsBound) return;
     this.debuggerEventsBound = true;
 
-    chrome.debugger.onEvent.addListener((source, method, params) => {
+    this.debuggerEventListener = (source, method, params) => {
       if (source.tabId !== this.tabId) {
         return;
       }
@@ -771,6 +839,16 @@ export class ChromeAdapter implements BrowserAdapter {
           .join(': ')
           .trim();
         if (message) {
+          if (
+            this.consoleLogBuffer.length >= ChromeAdapter.MAX_CONSOLE_BUFFER
+          ) {
+            this.consoleLogBuffer.splice(
+              0,
+              this.consoleLogBuffer.length -
+                ChromeAdapter.MAX_CONSOLE_BUFFER +
+                1
+            );
+          }
           this.consoleLogBuffer.push(message);
           for (const handler of this.consoleHandlers) {
             handler(message);
@@ -792,6 +870,16 @@ export class ChromeAdapter implements BrowserAdapter {
           const prefix = payload.entry?.level ? `${payload.entry.level}: ` : '';
           const suffix = payload.entry?.url ? ` (${payload.entry.url})` : '';
           const message = `${prefix}${text}${suffix}`;
+          if (
+            this.consoleLogBuffer.length >= ChromeAdapter.MAX_CONSOLE_BUFFER
+          ) {
+            this.consoleLogBuffer.splice(
+              0,
+              this.consoleLogBuffer.length -
+                ChromeAdapter.MAX_CONSOLE_BUFFER +
+                1
+            );
+          }
           this.consoleLogBuffer.push(message);
           for (const handler of this.consoleHandlers) {
             handler(message);
@@ -809,6 +897,11 @@ export class ChromeAdapter implements BrowserAdapter {
           };
         };
         if (payload.requestId && payload.request) {
+          // Evict oldest entries if metadata map is too large
+          if (this.requestMetadata.size >= ChromeAdapter.MAX_REQUEST_METADATA) {
+            const firstKey = this.requestMetadata.keys().next().value;
+            if (firstKey) this.requestMetadata.delete(firstKey);
+          }
           this.requestMetadata.set(payload.requestId, {
             method: payload.request.method || 'GET',
             url: payload.request.url || '',
@@ -837,6 +930,12 @@ export class ChromeAdapter implements BrowserAdapter {
           contentType: payload.response.mimeType || '',
           timestampMs: Date.now(),
         };
+        if (this.networkLogBuffer.length >= ChromeAdapter.MAX_NETWORK_BUFFER) {
+          this.networkLogBuffer.splice(
+            0,
+            this.networkLogBuffer.length - ChromeAdapter.MAX_NETWORK_BUFFER + 1
+          );
+        }
         this.networkLogBuffer.push(entry);
         for (const handler of this.responseHandlers) {
           handler(entry);
@@ -853,7 +952,8 @@ export class ChromeAdapter implements BrowserAdapter {
           this.requestMetadata.delete(payload.requestId);
         }
       }
-    });
+    };
+    chrome.debugger.onEvent.addListener(this.debuggerEventListener);
   }
 
   private async withInteractionMarker<T>(

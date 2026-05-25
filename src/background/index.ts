@@ -90,6 +90,7 @@ function normalizeFindingText(text: string): string {
  */
 function createDedupApiClient(baseUrl: string, key: string): ApiClient {
   const client = new ApiClient(baseUrl, key);
+  const MAX_SEEN_KEYS = 5000;
   const seenKeys = new Set<string>();
   const origEnsure = client.ensureTestRunFinding.bind(client);
 
@@ -112,6 +113,22 @@ function createDedupApiClient(baseUrl: string, key: string): ApiClient {
         interactionRunIds: [params.testInteractionRunId],
         createdAt: null,
       };
+    }
+    // Evict oldest entries when approaching the cap. The API-side
+    // ensureTestRunFinding already deduplicates, so a few extra writes
+    // after eviction are harmless.
+    if (seenKeys.size >= MAX_SEEN_KEYS) {
+      const iter = seenKeys.values();
+      for (let i = 0; i < 500; i++) iter.next();
+      // Sets iterate in insertion order — delete the oldest batch
+      const toDelete: string[] = [];
+      const it = seenKeys.values();
+      for (let i = 0; i < 500; i++) {
+        const v = it.next();
+        if (v.done) break;
+        toDelete.push(v.value);
+      }
+      for (const k of toDelete) seenKeys.delete(k);
     }
     seenKeys.add(dedupKey);
     return origEnsure(params);
