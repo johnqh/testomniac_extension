@@ -847,6 +847,223 @@ async function resumePausedScan() {
 }
 
 // ============================================================================
+// Scenario Execution
+// ============================================================================
+
+async function runScenario(
+  scenarioId: number,
+  _runnerId: number,
+  startingPath: string,
+  _testEnvironmentId?: number
+): Promise<void> {
+  await loadConfig();
+  const baseUrl = apiUrl;
+  const key = apiKey;
+  if (!baseUrl || !key) {
+    ERR('runScenario: missing API config');
+    return;
+  }
+
+  try {
+    startKeepalive();
+
+    // Fetch scenario's generated test interactions
+    const scenarioRes = await fetch(
+      `${baseUrl}/api/v1/test-scenarios/${scenarioId}`,
+      { headers: { 'X-Scanner-Key': key } }
+    );
+    const scenarioJson = await scenarioRes.json();
+    if (!scenarioJson.success) {
+      ERR('runScenario: failed to fetch scenario');
+      return;
+    }
+
+    // Fetch sequences for this scenario
+    const seqRes = await fetch(
+      `${baseUrl}/api/v1/test-scenario-sequences?testScenarioId=${scenarioId}`,
+      { headers: { 'X-Scanner-Key': key } }
+    );
+    const seqJson = await seqRes.json();
+    const sequences = seqJson.success ? (seqJson.data ?? []) : [];
+
+    if (sequences.length === 0) {
+      LOG('runScenario: no sequences found');
+      broadcastProgress('SCENARIO_PROGRESS', {
+        step: 0,
+        totalSteps: 0,
+        status: 'no_sequences',
+      });
+      return;
+    }
+
+    // Use the first sequence
+    const sequence = sequences[0];
+
+    // Fetch linked test interactions for this sequence
+    const linksRes = await fetch(
+      `${baseUrl}/api/v1/test-scenarios/sequences/${sequence.id}/test-interactions`,
+      { headers: { 'X-Scanner-Key': key } }
+    );
+    const linksJson = await linksRes.json();
+    const links = linksJson.success ? (linksJson.data ?? []) : [];
+
+    if (links.length === 0) {
+      LOG('runScenario: no interactions in sequence');
+      broadcastProgress('SCENARIO_PROGRESS', {
+        step: 0,
+        totalSteps: 0,
+        status: 'no_interactions',
+      });
+      return;
+    }
+
+    // Sort by stepOrder
+    links.sort(
+      (a: { stepOrder: number }, b: { stepOrder: number }) =>
+        a.stepOrder - b.stepOrder
+    );
+
+    // Get active tab
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true,
+    });
+    if (!tab?.id) {
+      ERR('runScenario: no active tab');
+      return;
+    }
+
+    const adapter = new ChromeAdapter(tab.id);
+
+    // Navigate to starting path
+    const baseOrigin = tab.url ? new URL(tab.url).origin : '';
+    const fullUrl = startingPath.startsWith('http')
+      ? startingPath
+      : `${baseOrigin}${startingPath}`;
+    await adapter.goto(fullUrl, { timeout: 30000 });
+
+    const totalSteps = links.length;
+    broadcastProgress('SCENARIO_PROGRESS', {
+      step: 0,
+      totalSteps,
+      status: 'running',
+    });
+
+    // Execute each interaction's actions sequentially
+    for (let i = 0; i < links.length; i++) {
+      const link = links[i];
+      broadcastProgress('SCENARIO_PROGRESS', {
+        step: i + 1,
+        totalSteps,
+        interactionId: link.testInteractionId,
+        status: 'running',
+      });
+
+      // Fetch test actions for this interaction
+      const actionsRes = await fetch(
+        `${baseUrl}/api/v1/test-interactions/${link.testInteractionId}/actions`,
+        { headers: { 'X-Scanner-Key': key } }
+      );
+      const actionsJson = await actionsRes.json();
+      const actions = actionsJson.success ? (actionsJson.data ?? []) : [];
+
+      // Sort by stepOrder
+      actions.sort(
+        (a: { stepOrder: number }, b: { stepOrder: number }) =>
+          a.stepOrder - b.stepOrder
+      );
+
+      for (const action of actions) {
+        try {
+          switch (action.actionType) {
+            case 'goto':
+              if (action.path) {
+                const navUrl = action.path.startsWith('http')
+                  ? action.path
+                  : `${baseOrigin}${action.path}`;
+                await adapter.goto(navUrl, { timeout: 30000 });
+              }
+              break;
+            case 'click':
+              if (action.playwrightLocator || action.selector) {
+                await adapter.click(
+                  action.playwrightLocator || action.selector,
+                  { timeout: 10000 }
+                );
+              }
+              break;
+            case 'hover':
+              if (action.playwrightLocator || action.selector) {
+                await adapter.hover(
+                  action.playwrightLocator || action.selector,
+                  { timeout: 10000 }
+                );
+              }
+              break;
+            case 'fill':
+            case 'type':
+              if (
+                (action.playwrightLocator || action.selector) &&
+                action.value != null
+              ) {
+                await adapter.type(
+                  action.playwrightLocator || action.selector,
+                  action.value
+                );
+              }
+              break;
+            case 'press':
+              if (action.value) {
+                await adapter.pressKey(action.value);
+              }
+              break;
+            case 'selectOption':
+              if (
+                (action.playwrightLocator || action.selector) &&
+                action.value != null
+              ) {
+                await adapter.select(
+                  action.playwrightLocator || action.selector,
+                  action.value
+                );
+              }
+              break;
+          }
+          // Brief pause between actions
+          await new Promise(r => setTimeout(r, 500));
+        } catch (err) {
+          LOG(
+            `runScenario: action failed: ${action.actionType} — ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    }
+
+    broadcastProgress('SCENARIO_PROGRESS', {
+      step: totalSteps,
+      totalSteps,
+      status: 'completed',
+    });
+  } catch (err) {
+    ERR('runScenario failed', err);
+    broadcastProgress('SCENARIO_PROGRESS', {
+      step: 0,
+      totalSteps: 0,
+      status: 'error',
+      error: err instanceof Error ? err.message : String(err),
+    });
+  } finally {
+    stopKeepalive();
+  }
+}
+
+function broadcastProgress(type: string, data: Record<string, unknown>): void {
+  chrome.runtime.sendMessage({ type, ...data }).catch(() => {
+    // Side panel may not be open
+  });
+}
+
+// ============================================================================
 // Message Handlers
 // ============================================================================
 
@@ -914,6 +1131,21 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ ok: true, log: logBuffer });
   } else if (message.type === 'SET_AUTH_TOKEN') {
     chrome.storage.session.set({ firebaseToken: message.token || null });
+    sendResponse({ ok: true });
+  } else if (
+    message.type === 'START_SCENARIO' &&
+    message.scenarioId &&
+    message.runnerId
+  ) {
+    LOG(
+      `START_SCENARIO: scenarioId=${message.scenarioId}, runnerId=${message.runnerId}`
+    );
+    void runScenario(
+      message.scenarioId,
+      message.runnerId,
+      message.startingPath ?? '/',
+      message.testEnvironmentId
+    );
     sendResponse({ ok: true });
   } else if (message.type === 'SAVE_CONFIG') {
     LOG(

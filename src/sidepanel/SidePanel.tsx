@@ -286,7 +286,13 @@ const initialProgress: ScanProgress = {
   events: [],
 };
 
-type ResultTab = 'overview' | 'map' | 'coverage' | 'issues' | 'events';
+type ResultTab =
+  | 'overview'
+  | 'map'
+  | 'coverage'
+  | 'issues'
+  | 'events'
+  | 'scenarios';
 
 const EXPERTISE_OPTIONS: ExpertiseOption[] = [
   { slug: 'tester', label: 'Tester', required: true },
@@ -421,6 +427,25 @@ export function SidePanel() {
   const [settingsApiUrl, setSettingsApiUrl] = useState('');
   const [settingsApiKey, setSettingsApiKey] = useState('');
   const [settingsClickWaitMs, setSettingsClickWaitMs] = useState('500');
+
+  // Scenario state
+  interface ScenarioItem {
+    id: number;
+    title: string;
+    startingPath: string;
+    prompt: string;
+    sizeClass: string;
+  }
+  const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
+  const [loadingScenarios, setLoadingScenarios] = useState(false);
+  const [showNewScenarioForm, setShowNewScenarioForm] = useState(false);
+  const [newScenarioTitle, setNewScenarioTitle] = useState('');
+  const [newScenarioPath, setNewScenarioPath] = useState('');
+  const [newScenarioPrompt, setNewScenarioPrompt] = useState('');
+  const [creatingScenario, setCreatingScenario] = useState(false);
+  const [runningScenarioId, setRunningScenarioId] = useState<number | null>(
+    null
+  );
 
   // Load settings from storage when settings panel opens
   useEffect(() => {
@@ -1143,6 +1168,104 @@ export function SidePanel() {
       window.clearInterval(intervalId);
     };
   }, [token, progress.scanId, progress.isComplete, progress.phase]);
+
+  // Load scenarios when switching to scenarios tab
+  const fetchScenarios = useCallback(async () => {
+    const runnerId = runSummary?.runnerId;
+    if (!token || !runnerId) return;
+    setLoadingScenarios(true);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/v1/runners/${runnerId}/test-scenarios`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const json = await res.json();
+      if (json.success) setScenarios(json.data ?? []);
+    } catch {
+      // ignore
+    } finally {
+      setLoadingScenarios(false);
+    }
+  }, [token, runSummary?.runnerId]);
+
+  useEffect(() => {
+    if (resultTab === 'scenarios') void fetchScenarios();
+  }, [resultTab, fetchScenarios]);
+
+  const handleCreateScenario = useCallback(async () => {
+    const runnerId = runSummary?.runnerId;
+    if (!token || !runnerId || !newScenarioTitle.trim()) return;
+    setCreatingScenario(true);
+    try {
+      // Create scenario
+      const createRes = await fetch(
+        `${API_URL}/api/v1/runners/${runnerId}/test-scenarios`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            runnerId,
+            title: newScenarioTitle.trim(),
+            startingPath: newScenarioPath.trim() || '/',
+            prompt: newScenarioPrompt.trim(),
+          }),
+        }
+      );
+      const createJson = await createRes.json();
+      if (createJson.success && createJson.data?.id) {
+        // Generate test interactions from prompt
+        await fetch(
+          `${API_URL}/api/v1/test-scenarios/${createJson.data.id}/generate`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+        setNewScenarioTitle('');
+        setNewScenarioPath('');
+        setNewScenarioPrompt('');
+        setShowNewScenarioForm(false);
+        void fetchScenarios();
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCreatingScenario(false);
+    }
+  }, [
+    token,
+    runSummary?.runnerId,
+    newScenarioTitle,
+    newScenarioPath,
+    newScenarioPrompt,
+    fetchScenarios,
+  ]);
+
+  const handleRunScenario = useCallback(
+    async (scenario: ScenarioItem) => {
+      const runnerId = runSummary?.runnerId;
+      if (!runnerId || isScanning || runningScenarioId != null) return;
+      setRunningScenarioId(scenario.id);
+      try {
+        chrome.runtime.sendMessage({
+          type: 'START_SCENARIO',
+          scenarioId: scenario.id,
+          runnerId,
+          startingPath: scenario.startingPath,
+          testEnvironmentId: runSummary?.testEnvironmentId,
+        });
+      } catch {
+        setRunningScenarioId(null);
+      }
+    },
+    [runSummary, isScanning, runningScenarioId]
+  );
 
   const handleStop = useCallback(() => {
     chrome.runtime.sendMessage({ type: 'STOP_SCAN' });
@@ -1931,6 +2054,7 @@ export function SidePanel() {
               { key: 'issues', label: 'Errors' },
               { key: 'coverage', label: 'Coverage' },
               { key: 'events', label: 'All Events' },
+              { key: 'scenarios', label: 'Scenarios' },
             ] as const
           ).map(tab => (
             <button
@@ -2174,6 +2298,93 @@ export function SidePanel() {
                   No coverage tree yet
                 </div>
               )}
+            </div>
+          )}
+
+          {resultTab === 'scenarios' && (
+            <div className='flex-1 overflow-y-auto'>
+              <div className='p-2 space-y-2'>
+                <button
+                  onClick={() => setShowNewScenarioForm(v => !v)}
+                  className='w-full text-left text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 rounded-md border border-dashed border-blue-300 hover:bg-blue-50'
+                >
+                  {showNewScenarioForm ? '- Cancel' : '+ New Scenario'}
+                </button>
+
+                {showNewScenarioForm && (
+                  <div className='space-y-1.5 rounded-md border border-gray-200 bg-gray-50 p-2'>
+                    <input
+                      type='text'
+                      placeholder='Title (e.g., Checkout flow)'
+                      value={newScenarioTitle}
+                      onChange={e => setNewScenarioTitle(e.target.value)}
+                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
+                    />
+                    <input
+                      type='text'
+                      placeholder='Starting path (e.g., /store)'
+                      value={newScenarioPath}
+                      onChange={e => setNewScenarioPath(e.target.value)}
+                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
+                    />
+                    <textarea
+                      placeholder='Prompt (e.g., Add item to cart and complete checkout)'
+                      value={newScenarioPrompt}
+                      onChange={e => setNewScenarioPrompt(e.target.value)}
+                      rows={3}
+                      className='w-full text-xs px-2 py-1 border border-gray-300 rounded resize-none'
+                    />
+                    <button
+                      onClick={handleCreateScenario}
+                      disabled={creatingScenario || !newScenarioTitle.trim()}
+                      className='w-full text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 rounded'
+                    >
+                      {creatingScenario ? 'Creating...' : 'Create'}
+                    </button>
+                  </div>
+                )}
+
+                {loadingScenarios && (
+                  <div className='text-center text-xs text-gray-400 py-4'>
+                    Loading scenarios...
+                  </div>
+                )}
+
+                {!loadingScenarios && scenarios.length === 0 && (
+                  <div className='text-center text-xs text-gray-400 py-4'>
+                    No scenarios yet
+                  </div>
+                )}
+
+                {scenarios.map(s => (
+                  <div
+                    key={s.id}
+                    className='rounded-md border border-gray-200 bg-white px-2.5 py-2 flex items-center justify-between'
+                  >
+                    <div className='min-w-0 flex-1'>
+                      <div className='text-xs font-medium text-gray-800 truncate'>
+                        {s.title}
+                      </div>
+                      <div className='text-[10px] text-gray-400 truncate'>
+                        {s.startingPath}
+                        {s.prompt ? ` — ${s.prompt}` : ''}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRunScenario(s)}
+                      disabled={isScanning || runningScenarioId != null}
+                      className='ml-2 shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white bg-green-500 hover:bg-green-600 disabled:opacity-40'
+                      title='Run scenario'
+                    >
+                      {runningScenarioId === s.id ? (
+                        <span className='text-[10px]'>...</span>
+                      ) : (
+                        <span className='text-sm'>&#9654;</span>
+                      )}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
