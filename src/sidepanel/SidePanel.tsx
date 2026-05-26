@@ -937,6 +937,7 @@ export function SidePanel() {
           environmentLabel: resolvedEnvironment.label,
           environmentKind: resolvedEnvironment.kind,
           environmentHostname: activeHostname,
+          scanMode: scanMode !== 'full' ? scanMode : undefined,
           continueWithLogin,
           entityCredentialId:
             continueWithLogin &&

@@ -233,6 +233,7 @@ interface ScanState {
     timestamp: number;
     findingTitle?: string;
   }>;
+  scanMode: 'full' | 'partial' | 'minimum' | null;
   isComplete: boolean;
 }
 
@@ -272,6 +273,7 @@ let scanState: ScanState = {
   expertiseSummary: null,
   elapsedMs: 0,
   events: [],
+  scanMode: null,
   isComplete: false,
 };
 
@@ -348,6 +350,7 @@ function resetState() {
     expertiseSummary: null,
     elapsedMs: 0,
     events: [],
+    scanMode: null,
     isComplete: false,
   };
   void persistScanState();
@@ -489,6 +492,7 @@ async function runScanSession(
       hostname?: string;
     };
     resumeExisting?: boolean;
+    scanMode?: 'full' | 'partial' | 'minimum';
     loginOptions?: {
       continueWithLogin?: boolean;
       entityCredentialId?: number;
@@ -498,6 +502,7 @@ async function runScanSession(
 ) {
   const environment = options?.environment;
   const resumeExisting = options?.resumeExisting ?? false;
+  const scanMode = options?.scanMode;
   const loginOptions = options?.loginOptions;
   const instanceId =
     scanState.runnerInstanceId ?? (await ensureExtensionInstanceId());
@@ -527,6 +532,7 @@ async function runScanSession(
   scanState.phase = 'scanning';
   scanState.scanId = runId;
   scanState.targetUrl = url;
+  scanState.scanMode = scanMode ?? scanState.scanMode ?? null;
   scanState.runnerInstanceId = runnerInstanceId;
   startKeepalive();
   scanState.runnerInstanceName = runnerInstanceName;
@@ -784,6 +790,7 @@ async function runScanSession(
         loginUrl: resolvedLoginUrl,
         entityCredentialId: credentialId,
         credentials: credentialData,
+        scanMode,
       },
       api,
       expertises,
@@ -831,6 +838,7 @@ async function startScan(
     label?: string;
     hostname?: string;
   },
+  scanMode?: 'full' | 'partial' | 'minimum',
   loginOptions?: {
     continueWithLogin?: boolean;
     entityCredentialId?: number;
@@ -838,7 +846,11 @@ async function startScan(
   }
 ) {
   await dedupStore.clear();
-  activeRunPromise = runScanSession(url, runId, { environment, loginOptions });
+  activeRunPromise = runScanSession(url, runId, {
+    environment,
+    scanMode,
+    loginOptions,
+  });
   await activeRunPromise;
 }
 
@@ -881,6 +893,7 @@ async function resumePausedScan() {
       label: scanState.environmentLabel ?? undefined,
       hostname: scanState.environmentHostname ?? undefined,
     },
+    scanMode: scanState.scanMode ?? undefined,
     resumeExisting: true,
   });
 }
@@ -1115,7 +1128,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'START_SCAN' && message.url && message.runId) {
-    LOG(`START_SCAN: url=${message.url}, runId=${message.runId}`);
+    LOG(
+      `START_SCAN: url=${message.url}, runId=${message.runId}, scanMode=${message.scanMode ?? 'full'}`
+    );
     void startScan(
       message.url,
       message.runId,
@@ -1124,6 +1139,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         label: message.environmentLabel,
         hostname: message.environmentHostname,
       },
+      message.scanMode,
       {
         continueWithLogin: message.continueWithLogin,
         entityCredentialId: message.entityCredentialId,
@@ -1269,6 +1285,7 @@ void Promise.all([
         label: scanState.environmentLabel ?? undefined,
         hostname: scanState.environmentHostname ?? undefined,
       },
+      scanMode: scanState.scanMode ?? undefined,
       resumeExisting: true,
     });
   }
