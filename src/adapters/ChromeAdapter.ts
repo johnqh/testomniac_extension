@@ -234,6 +234,16 @@ export class ChromeAdapter implements BrowserAdapter {
     const contentLength = await this.getBodyTextLength();
     if (contentLength != null && contentLength < 50) {
       await this.stopPageLoadAndWaitForContent();
+
+      // After stopping and waiting, if there's still no content, throw so the
+      // caller can skip this page quickly instead of spending minutes trying
+      // to interact with an empty/broken page.
+      const finalLength = await this.getBodyTextLength();
+      if (finalLength != null && finalLength < 50) {
+        throw new Error(
+          `Page has no meaningful content after load (${finalLength} chars): ${url}`
+        );
+      }
     }
 
     await this.neutralizeNonHttpLinks();
