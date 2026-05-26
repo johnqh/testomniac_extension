@@ -1181,12 +1181,46 @@ export class ChromeAdapter implements BrowserAdapter {
 
   private async waitForTabLoad(timeout: number): Promise<void> {
     const start = Date.now();
+    // Minimum time to wait before accepting an interactive (but not complete)
+    // page.  Some pages have resources that never finish loading (tracking
+    // pixels, long-polling, chat widgets), keeping tab.status at 'loading'
+    // forever.  After this grace period we fall back to checking
+    // document.readyState via scripting so the scan isn't blocked.
+    const INTERACTIVE_GRACE_MS = 5000;
+
     while (Date.now() - start < timeout) {
       const tab = await chrome.tabs.get(this.tabId);
       if (tab.status === 'complete') {
         this.currentUrl = tab.url || this.currentUrl;
         return;
       }
+
+      // After the grace period, accept a page whose DOM is at least
+      // interactive — the document is parsed and usable even if sub-resources
+      // (images, scripts, iframes) are still loading.
+      const elapsed = Date.now() - start;
+      if (elapsed >= INTERACTIVE_GRACE_MS && tab.url?.startsWith('http')) {
+        try {
+          const [result] = await chrome.scripting.executeScript({
+            target: { tabId: this.tabId },
+            func: () => document.readyState,
+          });
+          if (
+            result?.result === 'interactive' ||
+            result?.result === 'complete'
+          ) {
+            logAdapter('waitForTabLoad:interactive-fallback', {
+              readyState: result.result,
+              elapsedMs: elapsed,
+            });
+            this.currentUrl = tab.url || this.currentUrl;
+            return;
+          }
+        } catch {
+          // scripting may fail if the page is mid-navigation — keep polling
+        }
+      }
+
       await new Promise(r => setTimeout(r, 200));
     }
   }
