@@ -768,13 +768,19 @@ async function runScanSession(
     LOG(
       `Calling runTestRun(adapter, {testRunId=${runId}, runnerId=${runnerId}, baseUrl=${new URL(url).origin}}, api, expertises=${expertises.map(expertise => expertise.name).join(',')}, eventHandler)`
     );
+    // Restrict scanning to the subpath of the scan URL.  For example,
+    // scanning https://example.com/shop/shoes scopes to /shop/shoes.
+    const parsedUrl = new URL(url);
+    const scanScopePath =
+      parsedUrl.pathname !== '/' ? parsedUrl.pathname : undefined;
+
     const result = await runTestRun(
       adapter,
       {
         testRunId: runId,
         runnerId,
         testEnvironmentId: run.testEnvironmentId ?? undefined,
-        baseUrl: new URL(url).origin,
+        baseUrl: parsedUrl.origin,
         sizeClass: 'desktop',
         runnerInstanceId,
         runnerInstanceName,
@@ -791,6 +797,7 @@ async function runScanSession(
         entityCredentialId: credentialId,
         credentials: credentialData,
         scanMode,
+        scanScopePath,
       },
       api,
       expertises,
