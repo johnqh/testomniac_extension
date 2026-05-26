@@ -93,6 +93,40 @@ function normalizeFindingText(text: string): string {
  */
 function createDedupApiClient(baseUrl: string, key: string): ApiClient {
   const client = new ApiClient(baseUrl, key);
+
+  // Wrap the private `request` method with retry logic for transient network
+  // failures.  Chrome MV3 service workers can wake from suspension mid-fetch,
+  // and brief connectivity blips produce `TypeError: Failed to fetch`.
+  // Without retries the entire scan crashes.
+  const MAX_RETRIES = 3;
+  const clientAny = client as any;
+  const origRequest = (clientAny.request as Function).bind(client);
+  clientAny.request = async function (
+    method: string,
+    path: string,
+    body?: unknown
+  ) {
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await origRequest(method, path, body);
+      } catch (err: unknown) {
+        const isNetworkError =
+          err instanceof TypeError &&
+          (err.message === 'Failed to fetch' ||
+            err.message.includes('NetworkError') ||
+            err.message.includes('network'));
+        if (!isNetworkError || attempt === MAX_RETRIES) {
+          throw err;
+        }
+        const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+        LOG(
+          `[retry] ${method} ${path} failed (attempt ${attempt + 1}/${MAX_RETRIES}): ${err.message}, retrying in ${delay}ms`
+        );
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  };
+
   const MAX_SEEN_KEYS = 5000;
   const seenKeys = new Set<string>();
   const origEnsure = client.ensureTestRunFinding.bind(client);
