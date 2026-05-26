@@ -228,22 +228,12 @@ export class ChromeAdapter implements BrowserAdapter {
       );
     }
 
-    // Check for empty page content
-    try {
-      const [result] = await chrome.scripting.executeScript({
-        target: { tabId: this.tabId },
-        func: () => {
-          const text = (document.body?.innerText || '').trim();
-          return text.length;
-        },
-      });
-      if (result?.result != null && result.result < 50) {
-        this.consoleLogBuffer.push(
-          'error: Page has no meaningful content text'
-        );
-      }
-    } catch {
-      // page may not be ready for scripting
+    // Check for empty page content; if the page is still loading with no
+    // meaningful text, force-stop the network load and wait for any
+    // client-side rendering to catch up.
+    const contentLength = await this.getBodyTextLength();
+    if (contentLength != null && contentLength < 50) {
+      await this.stopPageLoadAndWaitForContent();
     }
 
     await this.neutralizeNonHttpLinks();
@@ -1204,6 +1194,54 @@ export class ChromeAdapter implements BrowserAdapter {
     }
     // Re-focus the original tab
     await chrome.tabs.update(this.tabId, { active: true });
+  }
+
+  /**
+   * Return the trimmed text length of document.body, or null on failure.
+   */
+  private async getBodyTextLength(): Promise<number | null> {
+    try {
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        func: () => (document.body?.innerText || '').trim().length,
+      });
+      return result?.result ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Force-stop a stuck page load via CDP, then poll briefly for client-side
+   * content to render.  Called when goto() detects the page has no meaningful
+   * content after the initial load wait.
+   */
+  private async stopPageLoadAndWaitForContent(): Promise<void> {
+    // Stop pending network requests so the tab transitions to 'complete'
+    try {
+      await this.ensureDebugger();
+      await chrome.debugger.sendCommand(
+        { tabId: this.tabId },
+        'Page.stopLoading'
+      );
+      logAdapter('goto:stopLoading', { tabId: this.tabId });
+    } catch {
+      // debugger may not be attached yet — non-fatal
+    }
+
+    // Give client-side JS a chance to render content after load is stopped
+    const POLL_INTERVAL_MS = 500;
+    const MAX_WAIT_MS = 5000;
+    const start = Date.now();
+    while (Date.now() - start < MAX_WAIT_MS) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+      const len = await this.getBodyTextLength();
+      if (len != null && len >= 50) return;
+    }
+
+    this.consoleLogBuffer.push(
+      'warning: Page has no meaningful content after stopping load'
+    );
   }
 
   /**
