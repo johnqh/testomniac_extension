@@ -1,6 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuthStatus } from '@sudobility/auth-components';
 import { getFirebaseAuth } from '@sudobility/auth_lib';
+import type { NetworkClient } from '@sudobility/types';
+import {
+  useEntityManager,
+  usePersistedState,
+} from '@sudobility/testomniac_lib';
+import { chromeStorageAdapter } from '../storage/chromeStorageAdapter';
 import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -56,12 +62,6 @@ function normalizeApiError(
   }
 
   return fallback;
-}
-
-interface EntityOption {
-  id: string;
-  entitySlug: string;
-  displayName: string;
 }
 
 interface ProductOption {
@@ -398,6 +398,53 @@ function ElapsedTimer({
 export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
+
+  // NetworkClient for shared hooks (wraps fetch with the existing token)
+  const networkClient = useMemo<NetworkClient>(
+    () => ({
+      async request(url, options) {
+        const res = await fetch(url, {
+          method: options?.method ?? 'GET',
+          headers: options?.headers ?? undefined,
+          body: options?.body as string | undefined,
+          signal: options?.signal ?? undefined,
+        });
+        const data = await res.json();
+        return {
+          success: data.success ?? res.ok,
+          data,
+          ok: res.ok,
+          status: res.status,
+          statusText: res.statusText,
+          headers: {},
+          timestamp: new Date().toISOString(),
+        };
+      },
+      async get(url, options) {
+        return this.request(url, { ...options, method: 'GET' });
+      },
+      async post(url, body, options) {
+        return this.request(url, {
+          ...options,
+          method: 'POST',
+          body: body != null ? JSON.stringify(body) : undefined,
+          headers: { 'Content-Type': 'application/json', ...options?.headers },
+        });
+      },
+      async put(url, body, options) {
+        return this.request(url, {
+          ...options,
+          method: 'PUT',
+          body: body != null ? JSON.stringify(body) : undefined,
+          headers: { 'Content-Type': 'application/json', ...options?.headers },
+        });
+      },
+      async delete(url, options) {
+        return this.request(url, { ...options, method: 'DELETE' });
+      },
+    }),
+    []
+  );
   const [activeTabUrl, setActiveTabUrl] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -457,11 +504,15 @@ export function SidePanel() {
   }, [showSettings]);
 
   // Entity & product selection
-  const [entities, setEntities] = useState<EntityOption[]>([]);
+  const { entities, isLoading: loadingEntities } = useEntityManager({
+    networkClient,
+    baseUrl: API_URL,
+    token: token ?? '',
+    enabled: isAuthenticated && !!token,
+  });
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [loadingEntities, setLoadingEntities] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [selectedEnvironment, setSelectedEnvironment] =
     useState<EnvironmentChoice>('production');
@@ -473,7 +524,17 @@ export function SidePanel() {
   // Login credential state
   const [continueWithLogin, setContinueWithLogin] = useState(false);
   type ScanMode = 'full' | 'partial' | 'minimum';
-  const [scanMode, setScanMode] = useState<ScanMode>('full');
+  const isScanMode = useCallback(
+    (v: unknown): v is ScanMode =>
+      typeof v === 'string' && ['full', 'partial', 'minimum'].includes(v),
+    []
+  );
+  const [scanMode, setScanMode] = usePersistedState<ScanMode>(
+    'scanMode',
+    'full',
+    chromeStorageAdapter,
+    isScanMode
+  );
   const [credentials, setCredentials] = useState<EntityCredentialOption[]>([]);
   const [loadingCredentials, setLoadingCredentials] = useState(false);
   const [selectedCredentialId, setSelectedCredentialId] = useState<string>('');
@@ -528,29 +589,12 @@ export function SidePanel() {
     []
   );
 
-  // Fetch entities when authenticated
+  // Auto-select first entity when entities load
   useEffect(() => {
-    if (!isAuthenticated || !token) return;
-    setLoadingEntities(true);
-    fetch(`${API_URL}/api/v1/entities`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.success && Array.isArray(data.data)) {
-          setEntities(data.data);
-          if (data.data.length > 0 && !selectedEntityId) {
-            setSelectedEntityId(data.data[0].id);
-          }
-        }
-      })
-      .catch(err =>
-        logPanel('fetch-entities:failed', {
-          error: err instanceof Error ? err.message : String(err),
-        })
-      )
-      .finally(() => setLoadingEntities(false));
-  }, [isAuthenticated, token]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (entities.length > 0 && !selectedEntityId) {
+      setSelectedEntityId(entities[0].id);
+    }
+  }, [entities, selectedEntityId]);
 
   // Fetch products when entity is selected
   useEffect(() => {
@@ -765,6 +809,7 @@ export function SidePanel() {
       selectedEnvironment,
       resolvedEnvironmentLabel,
       userId: user?.uid,
+      scanMode,
     });
     if (
       !activeTabUrl ||
