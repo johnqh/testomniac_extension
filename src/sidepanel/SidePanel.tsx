@@ -1103,93 +1103,98 @@ export function SidePanel() {
     let cancelled = false;
 
     const fetchLiveData = () =>
-      Promise.all([
-        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(response => response.json()),
-        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/pages-summary`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(response => response.json()),
-        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/navigation-map`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(response => response.json()),
-        fetch(`${API_URL}/api/v1/runs/${progress.scanId}/structure`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }).then(response => response.json()),
-      ])
-        .then(([summaryData, pagesData, mapData, structureData]) => {
-          if (cancelled) return;
+      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/live-dashboard`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(response => response.json())
+        .then(
+          (dashboardData: {
+            success: boolean;
+            data: {
+              summary: RunSummary;
+              pagesSummary: RunPageSummary[];
+              navigationMap: NavigationMapData;
+              structure: RunStructureData | null;
+            };
+          }) => {
+            if (cancelled || !dashboardData?.success) return;
+            const {
+              summary,
+              pagesSummary: pages,
+              navigationMap,
+              structure,
+            } = dashboardData.data;
 
-          if (summaryData?.success && summaryData.data) {
-            const summary = summaryData.data as RunSummary;
-            setRunSummary(summary);
-            setProgress(prev => ({
-              ...prev,
-              pagesFound: Math.max(
-                prev.pagesFound,
-                summary.pagesFound ?? initialProgress.pagesFound
-              ),
-              pageStatesFound: Math.max(
-                prev.pageStatesFound,
-                summary.pageStatesFound ?? initialProgress.pageStatesFound
-              ),
-              testRunsCompleted: Math.max(
-                prev.testRunsCompleted,
-                summary.testRunsCompleted ?? initialProgress.testRunsCompleted
-              ),
-              aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
-              expertiseSummary:
-                Object.keys(summary.expertiseSummary ?? {}).length > 0
-                  ? Object.fromEntries(
-                      Object.entries(summary.expertiseSummary).map(
-                        ([name, counts]) => [
-                          name,
-                          {
-                            warnings: counts.warnings,
-                            errors: counts.errors,
-                          },
-                        ]
+            if (summary) {
+              setRunSummary(summary);
+              setProgress(prev => ({
+                ...prev,
+                pagesFound: Math.max(
+                  prev.pagesFound,
+                  summary.pagesFound ?? initialProgress.pagesFound
+                ),
+                pageStatesFound: Math.max(
+                  prev.pageStatesFound,
+                  summary.pageStatesFound ?? initialProgress.pageStatesFound
+                ),
+                testRunsCompleted: Math.max(
+                  prev.testRunsCompleted,
+                  summary.testRunsCompleted ?? initialProgress.testRunsCompleted
+                ),
+                aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+                expertiseSummary:
+                  Object.keys(summary.expertiseSummary ?? {}).length > 0
+                    ? Object.fromEntries(
+                        Object.entries(summary.expertiseSummary).map(
+                          ([name, counts]) => [
+                            name,
+                            {
+                              warnings: counts.warnings,
+                              errors: counts.errors,
+                            },
+                          ]
+                        )
                       )
-                    )
-                  : (prev.expertiseSummary ?? null),
-            }));
-          }
+                    : (prev.expertiseSummary ?? null),
+              }));
+            }
 
-          if (pagesData?.success && Array.isArray(pagesData.data)) {
-            const pages = pagesData.data as RunPageSummary[];
-            setRunPageSummaries(pages);
-            setProgress(prev => ({
-              ...prev,
-              pagesFound: Math.max(prev.pagesFound, pages.length),
-              pageStatesFound: Math.max(
-                prev.pageStatesFound,
-                pages.reduce(
-                  (total, page) => total + (page.pageStatesCount ?? 0),
-                  0
-                )
-              ),
-              testRunsCompleted: Math.max(
-                prev.testRunsCompleted,
-                pages.reduce(
-                  (total, page) => total + (page.testInteractionRunsCount ?? 0),
-                  0
-                )
-              ),
-              findingsFound: Math.max(
-                prev.findingsFound,
-                pages.reduce((total, page) => total + (page.errors ?? 0), 0)
-              ),
-            }));
-          }
+            if (Array.isArray(pages)) {
+              setRunPageSummaries(pages);
+              setProgress(prev => ({
+                ...prev,
+                pagesFound: Math.max(prev.pagesFound, pages.length),
+                pageStatesFound: Math.max(
+                  prev.pageStatesFound,
+                  pages.reduce(
+                    (total, page) => total + (page.pageStatesCount ?? 0),
+                    0
+                  )
+                ),
+                testRunsCompleted: Math.max(
+                  prev.testRunsCompleted,
+                  pages.reduce(
+                    (total, page) =>
+                      total + (page.testInteractionRunsCount ?? 0),
+                    0
+                  )
+                ),
+                findingsFound: Math.max(
+                  prev.findingsFound,
+                  pages.reduce((total, page) => total + (page.errors ?? 0), 0)
+                ),
+              }));
+            }
 
-          if (mapData?.success && mapData.data) {
-            setNavigationMap(mapData.data as NavigationMapData);
-          }
+            if (navigationMap) {
+              setNavigationMap(navigationMap);
+            }
 
-          if (structureData?.success && structureData.data) {
-            setRunStructure(structureData.data as RunStructureData);
+            if (structure) {
+              setRunStructure(structure);
+            }
           }
-        })
+        )
         .catch(err =>
           logPanel('fetch-live-data:failed', {
             error: err instanceof Error ? err.message : String(err),
