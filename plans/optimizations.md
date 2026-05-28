@@ -8,24 +8,111 @@ Cross-cutting analysis of `testomniac_runner_service`, `testomniac_extension`, `
 
 | # | Area | Repo | Impact | Effort | Est. Savings |
 |---|------|------|--------|--------|--------------|
-| 1 | [Parallelize page decomposition](#1-parallelize-page-decomposition-pipeline) | runner_service | Critical | Low | 350-1400ms/interaction |
+| **0** | [**Fix concurrent scan guard (bug)**](#0-fix-concurrent-scan-guard-bug) | **extension** | **Bug fix** | **Low** | **Prevents orphaned scans** |
+| 1 | [Parallelize page decomposition](#1-parallelize-page-decomposition-pipeline) | runner_service | High | Low | PuppeteerAdapter: 350-1400ms; ChromeAdapter: marginal (see caveats) |
 | 2 | [Parallelize POST /scan queries](#2-parallelize-post-apiscan-bootstrap) | api | Critical | Medium | 750-1500ms/scan creation |
-| 3 | [Parallelize test interaction generators](#3-parallelize-test-interaction-generators) | runner_service | Critical | Medium | 2-10s/discovery page |
+| 3 | [Parallelize test interaction generators](#3-parallelize-test-interaction-generators) | runner_service | Critical | High | 2-10s/discovery page (requires mutable-state audit) |
 | 4 | [Reduce live-dashboard query count](#4-reduce-live-dashboard-query-count) | api | Critical | Medium | 60-80% fewer queries |
-| 5 | [Batch writes in test-interactions/batch](#5-batch-writes-in-test-interactionsbatch-loop) | api | Critical | Medium | O(N) -> O(1) DB calls |
+| 5 | [Batch writes in test-interactions/batch](#5-batch-writes-in-test-interactionsbatch-loop) | api | Critical | High | O(N) -> O(1) DB calls (requires raw SQL) |
 | 6 | [SSE stream polling efficiency](#6-sse-stream-polling-efficiency) | api | Critical | Low | 50-70% fewer queries |
 | 7 | [Batch log persistence](#7-batch-log-persistence) | extension | High | Low | 50-100x fewer writes |
-| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | High | Medium | 50-90% fewer DOM evals |
+| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | High | Medium | 50-90% fewer DOM evals (limited by mutation invalidation) |
 | 9 | [Debounce scanState persistence](#9-debounce-scanstate-persistence) | extension | High | Low | ~9x fewer writes |
 | 10 | [Increase ApiClient cache TTL](#10-increase-apiclient-cache-ttl) | runner_service | High | Low | 100-300ms/iteration |
 | 11 | [Cache normalized HTML](#11-cache-normalized-html) | runner_service | Medium | Low | 50-200ms/interaction |
-| 12 | [Add missing database indexes](#12-add-missing-database-indexes) | api | Medium | Low | Eliminates full scans |
+| 12 | [Add missing database indexes](#12-add-missing-database-indexes) | api | Medium | Low | Eliminates full scans (measure write cost) |
 | 13 | [Screenshot capture optimization](#13-screenshot-capture-optimization) | runner_service + extension | Medium | Medium | 200-800ms/interaction |
 | 14 | [Browser pool in server runner](#14-browser-pool-in-server-runner) | runner | Medium | High | 2-3s/run startup |
 | 15 | [Chromium launch flags](#15-chromium-launch-flags) | runner | Medium | Low | 20-40% less memory |
 | 16 | [Adaptive polling backoff](#16-adaptive-polling-backoff) | runner + extension | Low | Low | 80% fewer idle calls |
 | 17 | [Push pages-summary to DB](#17-push-pages-summary-aggregation-to-database) | api | Medium | Medium | Memory + latency |
 | 18 | [Plugin parallelization](#18-plugin-parallelization) | runner | Medium | Medium | 30-50% faster plugins |
+
+---
+
+## Implementation Order
+
+Items are grouped into phases that account for cross-repo dependencies and risk.
+
+### Phase 0: Bug fix (do first)
+- **#0 Concurrent scan guard** -- Bug, not optimization. Ship independently.
+
+### Phase 1: Extension-only (no API changes, no cross-repo coordination)
+- **#7 Batch log persistence**
+- **#9 Debounce scanState persistence**
+- **#20 Simplify dedup eviction** (dead code removal)
+
+### Phase 2: API database prep (deploy before query optimizations)
+- **#12 Add missing indexes** -- Must land before #4 and #6 so the new query patterns hit indexes, not sequential scans. Run `EXPLAIN ANALYZE` on production first; measure insert-side regression on high-write tables.
+
+### Phase 3: API query optimizations (deploy after indexes)
+- **#6 SSE stream polling** -- Low effort, high impact.
+- **#4 Live-dashboard query consolidation**
+- **#2 POST /scan parallelism**
+- **#5 Batch writes** -- Higher effort (raw SQL needed); can follow independently.
+- **#17 Pages-summary aggregation**
+
+### Phase 4: runner_service changes (shared library, requires coordinated release with extension + runner)
+- **#10 Cache TTL increase** -- Low risk, ship first.
+- **#11 Cache normalized HTML**
+- **#1 Parallelize page decomposition** -- Real benefit is PuppeteerAdapter only.
+- **#3 Parallelize generators** -- Requires mutable-state audit first (see investigation checklist below).
+
+### Phase 5: Extension adapter + runner adapter (independent per repo)
+- **#8 Cache materializeSelector**
+- **#13 Screenshot optimization**
+- **#15 Chromium launch flags**
+- **#14 Browser pool**
+- **#16 Adaptive polling backoff**
+- **#18 Plugin parallelization**
+
+### Cross-repo coordination notes
+- Items #1, #3, #10, #11 change `testomniac_runner_service`, which is aliased via `vite.config.ts` in the extension and imported as a package in the runner. Both consumers must be tested after changes.
+- Items #2, #4, #5, #6, #12, #17 are API-only. Deploy independently; no client changes needed.
+- Items #7, #8, #9 are extension-only. No coordination needed.
+- Items #14, #15, #18 are runner-only. No coordination needed.
+
+---
+
+## Measurement Plan
+
+Before starting any optimization, capture baselines. After each item, re-measure and compare.
+
+| Metric | How to measure | Applies to |
+|--------|---------------|------------|
+| Per-interaction time | Add timer around `executeTestInteraction()` in runner_service, log p50/p95 | #1, #8, #11, #13 |
+| Scan creation latency | Time the POST /scan handler end-to-end (API response time) | #2 |
+| Discovery page analysis time | Timer around `PageAnalyzer.generateTestInteractions()` | #3 |
+| Dashboard endpoint latency | API response time for `/runs/:id/live-dashboard` | #4, #12 |
+| Batch endpoint latency | API response time for `test-interactions/batch` with N items | #5, #12 |
+| SSE query load | `pg_stat_statements` query count for SSE-related queries over 1 minute | #6, #12 |
+| chrome.storage write count | Counter in `persistLog()` and `persistScanState()` over one full scan | #7, #9 |
+| Selector resolution time | Timer around `materializeSelector()`, log hit/miss rate | #8 |
+| Browser startup time | Timer from `puppeteer.launch()` to first `page.goto()` | #14, #15 |
+
+---
+
+## Bug Fix (Do First)
+
+### 0. Fix concurrent scan guard (bug)
+
+**Repo:** `testomniac_extension`
+**File:** `src/background/index.ts` (~line 1129)
+
+If two `START_SCAN` messages arrive in quick succession, both call `startScan()` via fire-and-forget (`void startScan(...)`). The second call overwrites `activeRunPromise`, orphaning the first scan -- it continues running but can no longer be paused, resumed, or stopped. This is a correctness bug, not just a performance issue.
+
+**Fix:** Add an explicit guard at the top of the `START_SCAN` handler:
+
+```typescript
+if (message.type === 'START_SCAN' && message.url && message.runId) {
+  if (scanState.isRunning || activeRunPromise) {
+    sendResponse({ ok: false, error: 'Scan already running' });
+    return true;
+  }
+  void startScan(...);
+  sendResponse({ ok: true });
+}
+```
 
 ---
 
@@ -65,13 +152,17 @@ const [scaffolds, patterns, items, forms, finalUiSnapshot, finalControlStates] =
   ]);
 ```
 
-**Caveat:** Verify the adapter supports concurrent `executeScript` calls without serialization (ChromeAdapter serializes through a single tab; PuppeteerAdapter evaluates on a single page). If the adapter serializes, the gain is smaller but still avoids intermediate JS overhead.
+**Important caveat -- adapter serialization:**
+- **ChromeAdapter** serializes all `chrome.scripting.executeScript` calls through a single tab. `Promise.all` will still execute sequentially at the browser level. The only savings come from reduced JS-to-native round-trip overhead between calls, which is marginal. **The 350-1400ms estimate does not apply to the extension.**
+- **PuppeteerAdapter** evaluates on a single page context. Puppeteer serializes `page.evaluate()` calls internally. The benefit is similar -- marginal round-trip savings, not true parallelism.
+- **Real benefit:** This optimization mainly helps if any of these functions do async JS work (timers, network) rather than pure DOM reads. If they're all synchronous DOM evaluations, `Promise.all` provides negligible improvement over sequential `await`.
+- **Revised estimate:** Marginal for both adapters (5-50ms savings from reduced scheduling overhead). Downgraded from "Critical" to "High" -- still worth doing as it's low effort, but temper expectations.
 
 ---
 
 ### 2. Parallelize POST /api/scan bootstrap
 
-**Repo:** `testomniac_api`
+**Repo:** `testomniac_api` (API-only change, no client coordination needed)
 **File:** `src/routes/scan.ts` (~lines 159-623)
 
 Scan creation performs **19 sequential database operations**: resolve environment, find/create runner, find/create surface, find/create interaction, find/create action, find/create bundle, link surface to bundle, create bundle run, create surface run, create interaction run, create test run, optionally store credentials.
@@ -100,6 +191,8 @@ Wave 3 (all run records, parallel):
 
 **Expected:** ~1-2s down to ~200-400ms (5x improvement).
 
+**Scope note:** This is an API-only change. The extension and runner call POST /scan and receive the same response shape -- no client changes needed.
+
 ---
 
 ### 3. Parallelize test interaction generators
@@ -125,7 +218,22 @@ await generateNavigationTestInteractions(this, ctx);
 
 **Fix:** Wrap in `Promise.all`. Note: `generateHoverFollowUpCases` runs earlier and must stay sequential (it mutates state used by these generators).
 
-**Caveat:** If generators share mutable state in PageAnalyzer (e.g., dedup sets), guard with per-generator local buffers that merge after completion, or accept the risk of minor duplicates that the API dedup catches.
+**Prerequisite -- mutable state audit (must complete before implementing):**
+
+The generators share mutable state in PageAnalyzer via dedup sets (`generatedPaths`, `generatedSelectors`, `reportedPageFindings`, `reportedFindingKeys`, `reportedDescriptions`, `generatedActionableHashes`). Running generators concurrently risks race conditions where two generators both check `has(key)` before either calls `add(key)`, producing duplicate test interactions.
+
+This is not a minor issue -- duplicate interactions waste execution time (each one runs browser automation), not just API calls. The API dedup catches duplicate *findings* but not duplicate *interactions*.
+
+**Investigation checklist before implementing:**
+1. For each generator, list which dedup sets it reads and writes
+2. Identify which generators could produce overlapping keys (e.g., both navigation and scaffold generators might generate interactions for the same element)
+3. Determine if any generator's output depends on another generator's side effects (beyond hover follow-ups)
+4. If overlap exists, choose one of:
+   - (a) Per-generator local dedup buffers, merged after `Promise.all` with conflict resolution
+   - (b) Wrap dedup sets in a mutex (simple but reduces parallelism benefit)
+   - (c) Accept duplicates and add interaction-level dedup on the API side (adds API complexity)
+
+**Effort revised to High** due to this investigation requirement.
 
 ---
 
