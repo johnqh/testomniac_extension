@@ -9,17 +9,17 @@ Cross-cutting analysis of `testomniac_runner_service`, `testomniac_extension`, `
 | # | Area | Repo | Impact | Effort | Est. Savings |
 |---|------|------|--------|--------|--------------|
 | **0** | [**Fix concurrent scan guard (bug)**](#0-fix-concurrent-scan-guard-bug) | **extension** | **Bug fix** | **Low** | **Prevents orphaned scans** |
-| 1 | [Parallelize page decomposition](#1-parallelize-page-decomposition-pipeline) | runner_service | High | Low | PuppeteerAdapter: 350-1400ms; ChromeAdapter: marginal (see caveats) |
-| 2 | [Parallelize POST /scan queries](#2-parallelize-post-apiscan-bootstrap) | api | Critical | Medium | 750-1500ms/scan creation |
-| 3 | [Parallelize test interaction generators](#3-parallelize-test-interaction-generators) | runner_service | Critical | High | 2-10s/discovery page (requires mutable-state audit) |
+| 1 | [Parallelize page decomposition](#1-parallelize-page-decomposition-pipeline) | runner_service | Low | Low | 5-50ms both adapters (serialized execution contexts) |
+| 2 | [Reduce POST /scan sequential queries](#2-reduce-post-apiscan-sequential-queries) | api | Critical | Medium | 500-1000ms/scan creation |
+| 3 | [Parallelize test interaction generators](#3-parallelize-test-interaction-generators) | runner_service | Critical | Medium | 2-10s/discovery page |
 | 4 | [Reduce live-dashboard query count](#4-reduce-live-dashboard-query-count) | api | Critical | Medium | 60-80% fewer queries |
 | 5 | [Batch writes in test-interactions/batch](#5-batch-writes-in-test-interactionsbatch-loop) | api | Critical | High | O(N) -> O(1) DB calls (requires raw SQL) |
 | 6 | [SSE stream polling efficiency](#6-sse-stream-polling-efficiency) | api | Critical | Low | 50-70% fewer queries |
 | 7 | [Batch log persistence](#7-batch-log-persistence) | extension | High | Low | 50-100x fewer writes |
-| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | High | Medium | 50-90% fewer DOM evals (limited by mutation invalidation) |
+| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | Medium | Medium | 20-40% fewer DOM evals (fast-paths already exist; mutation invalidation limits hits) |
 | 9 | [Debounce scanState persistence](#9-debounce-scanstate-persistence) | extension | High | Low | ~9x fewer writes |
 | 10 | [Increase ApiClient cache TTL](#10-increase-apiclient-cache-ttl) | runner_service | High | Low | 100-300ms/iteration |
-| 11 | [Cache normalized HTML](#11-cache-normalized-html) | runner_service | Medium | Low | 50-200ms/interaction |
+| 11 | [Cache normalized HTML](#11-cache-normalized-html) | runner_service | Medium | Low | 10-50ms/interaction (only 1-2 calls hit expensive path) |
 | 12 | [Add missing database indexes](#12-add-missing-database-indexes) | api | Medium | Low | Eliminates full scans (measure write cost) |
 | 13 | [Screenshot capture optimization](#13-screenshot-capture-optimization) | runner_service + extension | Medium | Medium | 200-800ms/interaction |
 | 14 | [Browser pool in server runner](#14-browser-pool-in-server-runner) | runner | Medium | High | 2-3s/run startup |
@@ -55,8 +55,8 @@ Items are grouped into phases that account for cross-repo dependencies and risk.
 ### Phase 4: runner_service changes (shared library, requires coordinated release with extension + runner)
 - **#10 Cache TTL increase** -- Low risk, ship first.
 - **#11 Cache normalized HTML**
-- **#1 Parallelize page decomposition** -- Real benefit is PuppeteerAdapter only.
-- **#3 Parallelize generators** -- Requires mutable-state audit first (see investigation checklist below).
+- **#3 Parallelize generators** -- Safe to parallelize (generators treat context as read-only). Remove per-generator `invalidateSurfacesCache()` calls; do one invalidation after `Promise.all`.
+- **#1 Parallelize page decomposition** -- Both adapters serialize execution; savings are marginal (5-50ms). Low priority unless measurement proves otherwise.
 
 ### Phase 5: Extension adapter + runner adapter (independent per repo)
 - **#8 Cache materializeSelector**
@@ -135,8 +135,6 @@ const finalUiSnapshot = await captureUiSnapshot(adapter);
 const finalControlStates = await captureControlStates(adapter);
 ```
 
-Each is a browser-side evaluation (50-200ms). Sequential = 350-1400ms. They share no dependencies.
-
 **Fix:** `Promise.all` the six calls after `adapter.content()`:
 
 ```typescript
@@ -152,46 +150,62 @@ const [scaffolds, patterns, items, forms, finalUiSnapshot, finalControlStates] =
   ]);
 ```
 
-**Important caveat -- adapter serialization:**
-- **ChromeAdapter** serializes all `chrome.scripting.executeScript` calls through a single tab. `Promise.all` will still execute sequentially at the browser level. The only savings come from reduced JS-to-native round-trip overhead between calls, which is marginal. **The 350-1400ms estimate does not apply to the extension.**
-- **PuppeteerAdapter** evaluates on a single page context. Puppeteer serializes `page.evaluate()` calls internally. The benefit is similar -- marginal round-trip savings, not true parallelism.
-- **Real benefit:** This optimization mainly helps if any of these functions do async JS work (timers, network) rather than pure DOM reads. If they're all synchronous DOM evaluations, `Promise.all` provides negligible improvement over sequential `await`.
-- **Revised estimate:** Marginal for both adapters (5-50ms savings from reduced scheduling overhead). Downgraded from "Critical" to "High" -- still worth doing as it's low effort, but temper expectations.
+**Why savings are marginal (5-50ms):** Both adapters serialize JS execution through a single page context:
+- **ChromeAdapter** serializes `chrome.scripting.executeScript` calls through a single tab. `Promise.all` queues all six calls but the browser executes them one at a time.
+- **PuppeteerAdapter** serializes `page.evaluate()` calls internally through Puppeteer's protocol queue.
+
+The only savings come from reduced JS-to-native scheduling overhead between calls. These are all synchronous DOM evaluations -- no async work (timers, network) that could benefit from concurrent scheduling.
+
+**Priority: Low.** Still worth doing (low effort, cleaner code), but do not expect measurable wall-clock improvement. Only revisit if measurement shows any of these functions contain async work internally.
 
 ---
 
-### 2. Parallelize POST /api/scan bootstrap
+### 2. Reduce POST /api/scan sequential queries
 
 **Repo:** `testomniac_api` (API-only change, no client coordination needed)
 **File:** `src/routes/scan.ts` (~lines 159-623)
 
-Scan creation performs **19 sequential database operations**: resolve environment, find/create runner, find/create surface, find/create interaction, find/create action, find/create bundle, link surface to bundle, create bundle run, create surface run, create interaction run, create test run, optionally store credentials.
+Scan creation performs **19 sequential database operations**. Many have FK dependencies that prevent naive parallelism: runner ID is needed before surfaces/bundles, bundle run ID before surface run, surface run ID before interaction run, etc. (See `scan.ts` lines 309, 341, 459, 522.)
 
-**Fix:** Three waves of parallelism:
+**Fix:** Respect the dependency chain, but parallelize within each tier and use upserts to collapse find-then-create pairs:
 
 ```
-Wave 1 (parallel lookups):
-  - findEnvironment
-  - findRunner
-  - findSurfaces
-  - findBundle
+Tier 1 (independent lookup):
+  - resolveEnvironment
 
-Wave 2 (conditional creates, parallel where independent):
-  - createRunner (if needed)
-  - createSurface (if needed)
-  - createBundle (if needed)
+Tier 2 (depends on environment):
+  - findOrCreateRunner (upsert)
 
-Wave 3 (all run records, parallel):
+Tier 3 (depends on runner -- can parallelize these two):
+  - findOrCreateSurface (upsert)         ─┐
+  - findOrCreateBundle (upsert)          ─┘ parallel
+
+Tier 4 (depends on surface):
+  - findOrCreateInteraction (upsert)
+  - findOrCreateAction (upsert)
+
+Tier 5 (depends on bundle + surface):
+  - linkSurfaceToBundle (idempotent)
+
+Tier 6 (depends on bundle):
   - insert bundleRun
+
+Tier 7 (depends on bundleRun + surface):
   - insert surfaceRun
+
+Tier 8 (depends on surfaceRun + interaction):
   - insert interactionRun
-  - insert testRun
-  - insert credentials (if provided)
+
+Tier 9 (depends on interactionRun + bundleRun -- can parallelize):
+  - insert testRun                       ─┐
+  - insert credentials (if provided)     ─┘ parallel
 ```
 
-**Expected:** ~1-2s down to ~200-400ms (5x improvement).
+This reduces from 19 sequential queries to 9 tiers (with parallelism within tiers 3 and 9). Each upsert collapses a find + conditional create into a single DB call.
 
-**Scope note:** This is an API-only change. The extension and runner call POST /scan and receive the same response shape -- no client changes needed.
+**Expected:** ~1-2s down to ~400-700ms (2-3x improvement). The previous estimate of 200-400ms was overconfident -- the dependency chain limits how much can be parallelized.
+
+**Scope note:** API-only change. The extension and runner call POST /scan and receive the same response shape -- no client changes needed.
 
 ---
 
@@ -218,22 +232,26 @@ await generateNavigationTestInteractions(this, ctx);
 
 **Fix:** Wrap in `Promise.all`. Note: `generateHoverFollowUpCases` runs earlier and must stay sequential (it mutates state used by these generators).
 
-**Prerequisite -- mutable state audit (must complete before implementing):**
+**Mutable state risk is low:** Code inspection confirms that generators receive a shared `AnalyzerContext` but treat it as **read-only** in practice. Each generator creates its own surfaces and interactions via API calls -- they don't write to each other's output. The PageAnalyzer dedup sets (`generatedPaths`, `generatedSelectors`, etc.) are populated by the earlier `generateHoverFollowUpCases` call, and the 11 generators listed above only read from them.
 
-The generators share mutable state in PageAnalyzer via dedup sets (`generatedPaths`, `generatedSelectors`, `reportedPageFindings`, `reportedFindingKeys`, `reportedDescriptions`, `generatedActionableHashes`). Running generators concurrently risks race conditions where two generators both check `has(key)` before either calls `add(key)`, producing duplicate test interactions.
+The main concern is `invalidateSurfacesCache()`, which is called between generators in the current sequential flow. When parallelized, these per-generator cache invalidations become no-ops (each generator fetches fresh data anyway). **Remove per-generator `invalidateSurfacesCache()` calls and do a single invalidation after `Promise.all` completes.**
 
-This is not a minor issue -- duplicate interactions waste execution time (each one runs browser automation), not just API calls. The API dedup catches duplicate *findings* but not duplicate *interactions*.
-
-**Investigation checklist before implementing:**
-1. For each generator, list which dedup sets it reads and writes
-2. Identify which generators could produce overlapping keys (e.g., both navigation and scaffold generators might generate interactions for the same element)
-3. Determine if any generator's output depends on another generator's side effects (beyond hover follow-ups)
-4. If overlap exists, choose one of:
-   - (a) Per-generator local dedup buffers, merged after `Promise.all` with conflict resolution
-   - (b) Wrap dedup sets in a mutex (simple but reduces parallelism benefit)
-   - (c) Accept duplicates and add interaction-level dedup on the API side (adds API complexity)
-
-**Effort revised to High** due to this investigation requirement.
+```typescript
+await Promise.all([
+  generateRenderTestInteractions(this, ctx),
+  generateFormTestInteractions(this, ctx),
+  generateLoginTestInteractions(this, ctx),
+  generateSemanticJourneyTestInteractions(this, ctx),
+  generateE2ETestInteractions(this, ctx),
+  generateDialogLifecycleTestInteractions(this, ctx),
+  generateScaffoldTestInteractions(this, ctx),
+  generateContentTestInteractions(this, ctx),
+  generateKeyboardAndDisclosureTestInteractions(this, ctx),
+  generateVariantTestInteractions(this, ctx),
+  generateNavigationTestInteractions(this, ctx),
+]);
+this.api.invalidateSurfacesCache();
+```
 
 ---
 
@@ -268,24 +286,23 @@ The `/runs/:runId/live-dashboard` endpoint performs 6-8 sequential queries:
 
 The batch endpoint correctly pre-fetches data (2 parallel queries), but then performs **per-item** `db.update()` or `db.insert()` inside the loop (N items = N queries). Interaction run creation adds another N queries.
 
-**Fix:** Collect all updates and inserts, then execute as two bulk operations:
+**Fix:** Collect all updates and inserts, then execute as two bulk operations.
 
-```typescript
-const toUpdate = [];
-const toInsert = [];
+**Implementation note:** Drizzle ORM does not natively support multi-row updates with different values per row. The bulk insert is straightforward (`db.insert().values([...])`) but bulk updates require one of:
 
-for (const item of items) {
-  if (existing) toUpdate.push({ id: existing.id, data: { ... } });
-  else toInsert.push({ ... });
-}
-
-await Promise.all([
-  toUpdate.length ? batchUpdate(testInteractions, toUpdate) : null,
-  toInsert.length ? db.insert(testInteractions).values(toInsert) : null,
-]);
-```
+- **Raw SQL with `unnest()` arrays** (PostgreSQL-specific):
+  ```sql
+  UPDATE testomniac.test_interactions AS t
+  SET title = v.title, steps_json = v.steps_json, ...
+  FROM (SELECT unnest($1::int[]) AS id, unnest($2::text[]) AS title, unnest($3::jsonb[]) AS steps_json) AS v
+  WHERE t.id = v.id;
+  ```
+- **CTE approach:** Build a VALUES CTE and JOIN against it
+- **Parallel individual updates:** `Promise.all(toUpdate.map(u => db.update(...).where(...)))` -- simpler, still avoids sequential awaits even if not a single SQL statement
 
 For interaction runs, use a single multi-row insert.
+
+**Effort revised to High** due to raw SQL complexity for the update path.
 
 ---
 
@@ -308,14 +325,14 @@ At 100 concurrent dashboards = 2,000 queries/minute.
 
 ## High Priority
 
-### 7. Batch log persistence
+### 7. Batch log persistence (highest-impact extension fix)
 
 **Repo:** `testomniac_extension`
 **File:** `src/background/index.ts` (~lines 33-57)
 
-`persistLog()` writes to `chrome.storage.local` on **every single log call** via `appendLog()`. During active scans with hundreds of log messages, this thrashes chrome.storage.
+`persistLog()` writes to `chrome.storage.local` on **every single log call** via `appendLog()`. Verified: 300-1000+ `persistLog()` calls per scan, each doing a full `chrome.storage.local.set()`. This is the single worst source of storage thrashing in the extension.
 
-**Fix:** Flush log buffer on a timer (every 1-2s) or threshold (50 entries), matching the pattern already used by `ChromeStorageDedupStore`.
+**Fix:** Flush log buffer on a timer (every 1-2s) or threshold (50 entries), matching the pattern already used by `ChromeStorageDedupStore`. Must also flush on service worker shutdown (see [Flush-on-shutdown pattern](#flush-on-shutdown-pattern) below).
 
 ---
 
@@ -323,9 +340,14 @@ At 100 concurrent dashboards = 2,000 queries/minute.
 
 **Repos:** `testomniac_extension` (`ChromeAdapter.ts` ~lines 56-208) and `testomniac_runner` (`PuppeteerAdapter.ts` ~lines 24-148)
 
-`materializeSelector()` is called before every interaction (click, hover, type, select, waitForSelector). Each call runs a full `executeScript` with DOM traversal across all elements matching `querySelectorAll(tagName || "*")`. Identical selectors are re-resolved repeatedly.
+`materializeSelector()` is called before every interaction (click, hover, type, select, waitForSelector). Not every call is expensive -- the function has three fast-paths:
+1. Non-replay selectors (no `tmnc-replay:` prefix) return immediately (~lines 57-59)
+2. CSS-spec selectors try `querySelector` first (~lines 95-98)
+3. ID selectors try `getElementById` (~lines 111-114)
 
-**Fix:** Add an LRU cache (size ~100) keyed by selector string. Invalidate on navigation (new page = new DOM). The cache is valid within a single page load.
+The expensive `querySelectorAll(tagName || "*")` path only triggers when all fast lookups fail. Caching only helps for replay selectors that hit the slow path.
+
+**Fix:** Add an LRU cache (size ~100) keyed by selector string, with invalidation on navigation AND mutation interactions.
 
 ```typescript
 private selectorCache = new Map<string, string>();
@@ -341,7 +363,17 @@ private async materializeSelector(selector: string): Promise<string> {
 
 // Clear on navigation:
 async goto(url) { this.selectorCache.clear(); ... }
+// Clear after DOM-mutating interactions:
+async click(selector) { ...; this.selectorCache.clear(); }
+async type(selector, text) { ...; this.selectorCache.clear(); }
+async select(selector, value) { ...; this.selectorCache.clear(); }
 ```
+
+**Cache invalidation caveat:** The cache must be cleared after any DOM-mutating interaction (`click`, `type`, `select`, `pressKey`), not just navigation. This limits hit rate to consecutive read-only operations on the same selector (e.g., `hover` then a subsequent read on the same element).
+
+**Note on waitForSelector:** In the current ChromeAdapter, `waitForSelector()` calls `materializeSelector()` once *before* the polling loop (`ChromeAdapter.ts` line 512), not on every 200ms iteration. The polling loop uses the already-resolved selector for its `executeScript` checks. So caching does not help within `waitForSelector` -- the benefit is across separate method calls (e.g., `click()` and then `hover()` on the same selector before any DOM mutation).
+
+**Estimate: 20-40% fewer DOM evaluations.** Many calls already take fast-paths; mutation invalidation limits cache hits for the slow-path calls that remain.
 
 ---
 
@@ -350,7 +382,7 @@ async goto(url) { this.selectorCache.clear(); ... }
 **Repo:** `testomniac_extension`
 **File:** `src/background/index.ts` (~lines 296-437)
 
-`sendProgressToSidePanel()` calls `persistScanState()` unconditionally on every invocation. During active scanning, stats update frequently.
+`sendProgressToSidePanel()` calls `persistScanState()` unconditionally on every invocation. It is called from 9+ code paths, but the highest-frequency caller during active scanning is `addEvent()` (~line 419), which fires on every scanner event. `onStatsUpdated()` (~line 670) is the second highest. Together these can produce dozens of `persistScanState()` calls per second during peak scanning.
 
 **Fix:** Persist every Nth update (e.g., 10) or on a debounce timer:
 
@@ -366,6 +398,12 @@ function sendProgressToSidePanel() {
 ```
 
 Always persist on phase transitions (scanning -> paused -> completed).
+
+**Service worker termination risk:** Chrome can terminate the service worker between debounce intervals (30s idle, 5min hard limit). If terminated mid-debounce, the last few state updates are lost. Mitigations:
+- Always flush on phase transitions (already noted above)
+- Listen for `chrome.runtime.onSuspend` (if available) to trigger a final flush
+- Accept that losing a few numeric counter updates (pagesFound, findingsCount) between flushes is tolerable -- the auto-resume mechanism re-derives state from the API on restart
+- The keepalive alarm prevents termination during active scans, so this mainly affects the transition window after scan completion
 
 ---
 
@@ -387,14 +425,17 @@ Both `getTestSurfacesByRunner` and `getTestInteractionsByRunner` caches use a 5-
 **Repo:** `testomniac_runner_service`
 **Files:** `src/orchestrator/test-interaction-executor.ts`, `src/browser/page-utils.ts`
 
-`normalizeHtml()` runs 7 sequential regex replacements on the full HTML string. It's called multiple times per interaction:
-- Once for initial page state
-- Once per expectation group context (up to 5 groups)
-- Once in discovery context
+There are two different `normalizeHtml()` functions:
+- **`page-utils.ts`**: The expensive one -- 7 sequential regex replacements on the full HTML string. Called during `computeHashes()` and for page state creation.
+- **`test-interaction-executor.ts`**: A trivial type-guard wrapper that just ensures the value is a string. Zero cost.
 
-Additionally, `computeHashes()` calls `normalizeHtml()` again AND `htmlToMarkdown()` (which also parses HTML).
+The "called multiple times" claim is accurate, but only 1-2 of those calls hit the expensive `page-utils.ts` version. The rest are the trivial wrapper.
 
-**Fix:** Compute `normalizeHtml(html)` once after `adapter.content()` and pass the result through the pipeline. Same for markdown conversion.
+Additionally, `computeHashes()` calls the expensive `normalizeHtml()` AND `htmlToMarkdown()` (which also parses HTML). If `computeHashes()` is called after the initial normalization, the HTML gets normalized twice.
+
+**Fix:** Compute the expensive `normalizeHtml(html)` once after `adapter.content()` and pass the result to `computeHashes()` to avoid double-normalization. Same for markdown conversion if used more than once.
+
+**Revised estimate: 10-50ms/interaction** (down from "50-200ms") since only 1-2 calls per interaction hit the expensive path.
 
 ---
 
@@ -423,7 +464,9 @@ CREATE INDEX idx_tir_surface_run_status
   ON testomniac.test_interaction_runs(test_surface_run_id, status);
 ```
 
-Verify with `EXPLAIN ANALYZE` on production queries before adding.
+**Before adding, verify two things:**
+1. **Read benefit:** Run `EXPLAIN ANALYZE` on the target queries with production data to confirm they currently do sequential scans and would benefit from the index.
+2. **Write cost:** These tables receive heavy inserts during active scans (especially `test_interaction_runs` and `test_run_findings`). Each additional index slows inserts. Measure insert throughput before/after on a staging dataset. If insert regression exceeds 10%, consider partial indexes (e.g., `WHERE is_active = true` for the interactions index) to reduce write amplification.
 
 ---
 
@@ -536,19 +579,12 @@ GROUP BY p.id;
 
 `waitForSelector` polls with `executeScript` every 200ms for up to 5 seconds (25 calls). Use exponential backoff: start at 200ms, increase to 500ms as timeout approaches.
 
-### 20. Simplify dedup eviction
+### 20. Remove dead code in dedup eviction
 
 **Repo:** `testomniac_extension`
 **File:** `src/background/index.ts` (~lines 157-169)
 
-The `seenKeys` Set eviction iterates twice (one loop does nothing). Simplify to a single pass deleting the first 500 entries.
-
-### 21. Guard concurrent scan starts
-
-**Repo:** `testomniac_extension`
-**File:** `src/background/index.ts` (~line 1129)
-
-If two `START_SCAN` messages arrive in quick succession, both fire. Add an explicit guard returning an error if a scan is already running.
+The `seenKeys` Set eviction has a first loop that advances an iterator 500 positions but discards the results -- this is dead code. A second loop creates a fresh iterator and collects the first 500 entries for deletion. The first loop does nothing. Remove it and simplify to a single pass.
 
 ### 22. test-surfaces/ensure-with-run parallelism
 
@@ -571,6 +607,8 @@ Per-item junction table queries after inserts. Batch all junction lookups into a
 
 Current: flush every 2s or 50 items. Increase to 3s / 100 items. Findings dedup is not critical during the scan; server-side dedup catches duplicates.
 
+**Risk:** `ChromeStorageDedupStore` has no lifecycle hook -- no `onSuspend` or flush-on-demand. If the service worker is killed by Chrome, pending entries in the in-memory `pendingAdds` Map are silently lost. Increasing thresholds from 2s/50 to 3s/100 increases the data loss window by 50%. **Before changing thresholds, first add a `flush()` method and wire it into the shutdown path** (see [Flush-on-shutdown pattern](#flush-on-shutdown-pattern)).
+
 ### 25. test-interactions/reconcile pagination
 
 **Repo:** `testomniac_api`
@@ -580,17 +618,56 @@ Loads ALL interactions for a surface with no LIMIT. For surfaces with 10,000+ in
 
 ---
 
+## Shared Pattern: Flush-on-shutdown
+
+Items #7 (log persistence), #9 (scanState persistence), and #24 (dedup store) all introduce or increase write buffering. None currently handle the case where Chrome terminates the service worker mid-buffer.
+
+**Establish this pattern once and reuse across all three:**
+
+```typescript
+// Shared flush registry
+const flushCallbacks: Array<() => Promise<void>> = [];
+
+function registerFlush(fn: () => Promise<void>) {
+  flushCallbacks.push(fn);
+}
+
+async function flushAll() {
+  await Promise.allSettled(flushCallbacks.map(fn => fn()));
+}
+
+// Wire into shutdown paths:
+// 1. Phase transitions (scanning -> paused -> completed -> failed)
+// 2. STOP_SCAN handler
+// 3. Before scan completion in onScanComplete()
+// Note: chrome.runtime.onSuspend is NOT available in MV3 service workers.
+//       The keepalive alarm prevents termination during active scans,
+//       so the main risk window is the few seconds after scan completion
+//       before the final flush timer fires.
+```
+
+Each buffered writer (#7, #9, #24) registers its flush function. All shutdown/completion paths call `flushAll()`.
+
+**Important:** MV3 service workers do not have `chrome.runtime.onSuspend`. The keepalive alarm prevents termination during active scans, so the risk window is narrow (a few seconds after scan completion). Accepting this small window of potential data loss is reasonable -- the auto-resume mechanism re-derives state from the API on restart.
+
+---
+
 ## Estimated Aggregate Impact
 
 If all critical + high priority items are implemented:
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
-| Per-interaction overhead | ~2-4s | ~0.5-1.5s | 60-75% |
-| Scan creation latency | ~1-2s | ~200-400ms | 75-80% |
+| Per-interaction overhead | ~2-4s | ~1-2.5s | 30-40% |
+| Scan creation latency | ~1-2s | ~400-700ms | 50-65% |
 | Dashboard query load | 6-8 queries/req | 2-3 queries/req | 60% |
 | SSE query load at 100 clients | 2,000/min | 600/min | 70% |
 | chrome.storage writes/scan | ~500+ | ~50 | 90% |
-| Discovery page analysis | ~3-12s | ~1-4s | 65% |
+| Discovery page analysis | ~3-12s | ~1-4s | 65% (requires #3 mutable state audit) |
 
-The biggest single wins come from parallelizing the page decomposition pipeline (#1) and the scan bootstrap (#2), as these are on the critical path of every interaction and every scan respectively.
+**Notes on revised estimates:**
+- Per-interaction improvement is modest because #1 (page decomposition) provides marginal benefit with serialized adapters (5-50ms), and #8 (selector caching) has limited hit rate due to fast-paths and mutation invalidation (20-40%).
+- Discovery page analysis improvement depends on #3 (generator parallelism), which is safe to parallelize (generators treat context as read-only; remove per-generator cache invalidation and do it once after).
+- Scan creation improvement revised from 75-80% to 50-65% because FK dependency chains limit parallelism to ~9 tiers, not 3 waves.
+- The biggest reliable wins are API-side: #2 (scan bootstrap), #4 (dashboard queries), #5 (batch writes), and #6 (SSE polling). These are independent of adapter serialization constraints.
+- Extension-side quick wins (#7, #9, #20) reduce I/O contention and are low-risk. #7 (log batching) is the single highest-impact extension fix (300-1000+ storage writes per scan eliminated).
