@@ -599,8 +599,8 @@ export function SidePanel() {
   // Fetch products when entity is selected
   useEffect(() => {
     if (!selectedEntityId || !token) {
-      setProducts([]);
-      setSelectedProductId('');
+      setProducts(prev => (prev.length === 0 ? prev : []));
+      setSelectedProductId(prev => (prev === '' ? prev : ''));
       return;
     }
     const entity = entities.find(e => e.id === selectedEntityId);
@@ -632,7 +632,9 @@ export function SidePanel() {
   useEffect(() => {
     if (!token || !activeTabUrl || products.length === 0) {
       if (products.length === 0) {
-        setSelectedProductId('__create__');
+        setSelectedProductId(prev =>
+          prev === '__create__' ? prev : '__create__'
+        );
       }
       return;
     }
