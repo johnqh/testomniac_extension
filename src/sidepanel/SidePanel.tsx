@@ -1209,13 +1209,22 @@ export function SidePanel() {
       };
     }
 
-    const intervalId = window.setInterval(() => {
-      void fetchLiveData();
-    }, 2000);
+    // Use sequential polling: wait for previous request to complete
+    // before starting the next one, preventing request pile-up when
+    // the dashboard response is slow
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const pollAfterDelay = () => {
+      timeoutId = setTimeout(async () => {
+        if (cancelled) return;
+        await fetchLiveData();
+        if (!cancelled) pollAfterDelay();
+      }, 3000);
+    };
+    pollAfterDelay();
 
     return () => {
       cancelled = true;
-      window.clearInterval(intervalId);
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [token, progress.scanId, progress.isComplete, progress.phase]);
 
