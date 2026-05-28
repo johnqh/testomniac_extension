@@ -159,9 +159,34 @@ bun run format:check   # Check formatting
 - **testomniac_lib** (`@sudobility/testomniac_lib`) — Business logic hooks
 - **testomniac_runner** — Server-side runner (uses PuppeteerAdapter instead of ChromeAdapter)
 
+## Deployment
+
+- `testomniac_app/scripts/push_all.sh` — formats, validates (typecheck/lint/test/build), version-bumps, commits, and pushes all repos in dependency order
+- All repos must be on `main` branch with no uncommitted changes for push_all.sh to work
+- push_all.sh auto-updates `@sudobility/*` dependency versions across repos
+- Database is remote (50.118.250.186) — connection pool set to 50, queries have ~33ms network latency
+- Database indexes are managed manually via SQL, not through Drizzle migrations
+
+## Performance Patterns
+
+- Batch endpoints accept arrays: `/test-interactions/batch`, `/test-run-findings/ensure-batch`, `/scaffolds/batch`, `/test-interaction-runs/complete-batch`, `/test-surface-runs/complete-batch`
+- `GET /scanner/runner-state?bundleRunId=X` — consolidated endpoint combining open surface runs + pending interaction runs with blocked status (raw SQL)
+- `GET /scanner/test-interactions?slim=true` — excludes heavy stepsJson/globalExpectationsJson fields
+- `GET /scanner/page-states?pageIds=1,2,3` — batch page states by comma-separated IDs
+- `POST /test-surfaces/ensure-with-run` — combines surface creation + bundle link + surface run in one call
+- `POST /test-interactions/reconcile` — server-side reconciliation replacing client-side fetch + retire
+- `GET /runs/:id/live-dashboard` — consolidated polling endpoint replacing 4 separate calls
+- ApiClient caches `getTestSurfacesByRunner` and `getTestInteractionsByRunner` with 5s TTL, auto-invalidated on mutation
+- Side panel uses sequential polling (wait for response + 3s delay) instead of setInterval to prevent request pile-up
+
 ## Gotchas
 
 - `@sudobility/testomniac_runner_service` is aliased to sibling directory source in vite.config.ts (not from node_modules)
+- Vite caches pre-bundled deps in `node_modules/.vite` — after changing runner_service source, run `rm -rf node_modules/.vite` and restart dev server
+- Chrome service workers can also cache stale JS — toggle extension off/on in chrome://extensions if code changes aren't reflected
+- postgres.js returns BIGSERIAL/int8 columns as strings (not numbers). When using raw SQL instead of Drizzle, always `Number()` ID fields in the response mapping
+- CHAR(N) columns are space-padded in PostgreSQL — use `.trim()` when comparing cached DB values against unpadded input
+- `testRunFindingRuns` has a FK to `testRunFindings.id` — always delete junction records before deleting findings
 - `node:crypto` is shimmed to a browser-compatible hash function
 - Vite HMR runs on port 7175
 - Chrome service workers can be terminated at any time — state must be persisted to chrome.storage
