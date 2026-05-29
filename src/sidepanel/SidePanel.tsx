@@ -106,6 +106,7 @@ interface ScanProgress {
   environmentHostname?: string | null;
   elapsedMs?: number;
   currentPageUrl: string | null;
+  status_update?: string | null;
   latestScreenshotDataUrl: string | null;
   isComplete: boolean;
   events: Array<{
@@ -122,6 +123,7 @@ interface RunSummary {
   runnerId: number;
   testEnvironmentId: number | null;
   status: string;
+  status_update?: string | null;
   aiSummary: string | null;
   pagesFound: number | null;
   pageStatesFound: number | null;
@@ -281,6 +283,7 @@ const initialProgress: ScanProgress = {
   aiSummary: null,
   expertiseSummary: null,
   currentPageUrl: null,
+  status_update: null,
   latestScreenshotDataUrl: null,
   isComplete: false,
   events: [],
@@ -1142,6 +1145,8 @@ export function SidePanel() {
                   summary.testRunsCompleted ?? initialProgress.testRunsCompleted
                 ),
                 aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+                status_update:
+                  summary.status_update ?? prev.status_update ?? null,
                 expertiseSummary:
                   Object.keys(summary.expertiseSummary ?? {}).length > 0
                     ? Object.fromEntries(
@@ -1411,6 +1416,9 @@ export function SidePanel() {
         }
       })()
     : null;
+  const activeStatusUpdate =
+    progress.status_update ??
+    (currentRelativePath ? `Current page: ${currentRelativePath}` : null);
   const fallbackScreenshotPath =
     runPageSummaries.find(
       page =>
@@ -2575,5 +2583,27 @@ export function SidePanel() {
     </div>
   );
 
-  return appView === 'scenarios' ? scenariosView : homeView;
+  return (
+    <div className='relative min-h-screen pb-11'>
+      {appView === 'scenarios' ? scenariosView : homeView}
+      {(isScanning || activeStatusUpdate) && (
+        <div className='fixed inset-x-0 bottom-0 z-50 border-t border-gray-200 bg-white/95 px-3 py-2 text-xs text-gray-700 shadow-sm backdrop-blur'>
+          <div className='flex items-center gap-2'>
+            <span
+              className={`h-2 w-2 rounded-full ${
+                isScanning && !progress.isPaused
+                  ? 'bg-blue-500 animate-pulse'
+                  : progress.phase === 'failed'
+                    ? 'bg-red-500'
+                    : progress.phase === 'completed'
+                      ? 'bg-green-500'
+                      : 'bg-gray-400'
+              }`}
+            />
+            <span className='truncate'>{activeStatusUpdate ?? 'Ready'}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

@@ -266,6 +266,7 @@ interface ScanState {
   environmentLabel: string | null;
   environmentHostname: string | null;
   currentPageUrl: string | null;
+  status_update: string | null;
   latestScreenshotDataUrl: string | null;
   aiSummary: string | null;
   expertiseSummary: Record<
@@ -317,6 +318,7 @@ let scanState: ScanState = {
   environmentLabel: null,
   environmentHostname: null,
   currentPageUrl: null,
+  status_update: null,
   latestScreenshotDataUrl: null,
   aiSummary: null,
   expertiseSummary: null,
@@ -396,6 +398,7 @@ function resetState() {
     environmentLabel: null,
     environmentHostname: null,
     currentPageUrl: null,
+    status_update: null,
     latestScreenshotDataUrl: null,
     aiSummary: null,
     expertiseSummary: null,
@@ -465,6 +468,7 @@ let pauseController = new PauseController(false);
 
 function addEvent(type: string, message: string, findingTitle?: string) {
   LOG(`[event] ${type}: ${message}`);
+  scanState.status_update = message;
   scanState.events.push({ type, message, timestamp: Date.now(), findingTitle });
   if (scanState.events.length > 100) scanState.events.shift();
   sendProgressToSidePanel();
@@ -671,11 +675,17 @@ async function runScanSession(
     LOG('Waiting 1s for page to settle...');
     await new Promise(r => setTimeout(r, 1000));
 
-    const eventHandler: ScanEventHandler = {
+    const eventHandler: ScanEventHandler & {
+      onStatusUpdate?: (update: {
+        message: string;
+        testRunId?: number;
+      }) => void;
+    } = {
       onPageFound(page) {
         LOG(`[event] pageFound: ${page.relativePath} (id=${page.pageId})`);
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
         scanState.currentPageUrl = page.relativePath;
+        scanState.status_update = `Discovered page ${page.relativePath}`;
         addEvent('page_discovered', page.relativePath);
       },
       onPageStateCreated(state) {
@@ -683,6 +693,7 @@ async function runScanSession(
           `[event] pageStateCreated: id=${state.pageStateId} pageId=${state.pageId}`
         );
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
+        scanState.status_update = 'Captured page state';
         addEvent('state_captured', 'Page state captured');
       },
       onTestSurfaceCreated(surface) {
@@ -690,6 +701,7 @@ async function runScanSession(
           `[event] testSurfaceCreated: surfaceId=${surface.surfaceId} title=${surface.title}`
         );
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
+        scanState.status_update = `Created test surface: ${surface.title}`;
         addEvent('test_surface_created', surface.title);
       },
       onTestInteractionRunCompleted(run) {
@@ -697,6 +709,7 @@ async function runScanSession(
           `[event] testInteractionRunCompleted: testInteractionRunId=${run.testInteractionRunId} passed=${run.passed}`
         );
         scanState.phase = scanState.isPaused ? 'paused' : 'scanning';
+        scanState.status_update = `Completed interaction run ${run.testInteractionRunId}`;
         addEvent(
           run.passed ? 'test_interaction_passed' : 'test_interaction_failed',
           `Test case run ${run.testInteractionRunId}`
@@ -735,7 +748,17 @@ async function runScanSession(
         if (typeof stats.elapsedMs === 'number') {
           scanState.elapsedMs = stats.elapsedMs;
         }
+        const statusMessage = (stats as { status_update?: string })
+          .status_update;
+        if (statusMessage) {
+          scanState.status_update = statusMessage;
+        }
         sendProgressToSidePanel();
+      },
+      onStatusUpdate(update) {
+        LOG(`[event] status_update: ${update.message}`);
+        scanState.status_update = update.message;
+        addEvent('status_update', update.message);
       },
       onScreenshotCaptured(data) {
         LOG(`[event] screenshotCaptured: ${data.pageUrl}`);
