@@ -28,10 +28,33 @@ const dedupStore = new ChromeStorageDedupStore();
 // ---------------------------------------------------------------------------
 const LOG_STORAGE_KEY = 'debugLog';
 const MAX_LOG_LINES = 500;
+const LOG_FLUSH_INTERVAL_MS = 2000;
+const LOG_FLUSH_THRESHOLD = 50;
 let logBuffer: string[] = [];
+let logDirtySinceFlush = 0;
+let logFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
 function persistLog() {
-  chrome.storage.local.set({ [LOG_STORAGE_KEY]: logBuffer }).catch(() => {});
+  logDirtySinceFlush = 0;
+  return chrome.storage.local
+    .set({ [LOG_STORAGE_KEY]: logBuffer })
+    .catch(() => {});
+}
+
+function scheduleLogFlush() {
+  if (logFlushTimer !== null) return;
+  logFlushTimer = setTimeout(() => {
+    logFlushTimer = null;
+    if (logDirtySinceFlush > 0) persistLog();
+  }, LOG_FLUSH_INTERVAL_MS);
+}
+
+function flushLogs() {
+  if (logFlushTimer !== null) {
+    clearTimeout(logFlushTimer);
+    logFlushTimer = null;
+  }
+  if (logDirtySinceFlush > 0) return persistLog();
 }
 
 function appendLog(level: string, args: unknown[]) {
@@ -44,7 +67,12 @@ function appendLog(level: string, args: unknown[]) {
   if (logBuffer.length > MAX_LOG_LINES) {
     logBuffer = logBuffer.slice(-MAX_LOG_LINES);
   }
-  persistLog();
+  logDirtySinceFlush++;
+  if (logDirtySinceFlush >= LOG_FLUSH_THRESHOLD) {
+    persistLog();
+  } else {
+    scheduleLogFlush();
+  }
 }
 
 const LOG = (...args: unknown[]) => {
@@ -55,6 +83,29 @@ const ERR = (...args: unknown[]) => {
   console.error('[Testomniac]', ...args);
   appendLog('ERR', args);
 };
+
+// ---------------------------------------------------------------------------
+// Flush-on-shutdown registry — shared by log buffer, scan state, dedup store
+// ---------------------------------------------------------------------------
+const flushCallbacks: Array<() => void | Promise<void>> = [];
+
+function registerFlush(fn: () => void | Promise<void>) {
+  flushCallbacks.push(fn);
+}
+
+async function flushAll() {
+  await Promise.allSettled(
+    flushCallbacks.map(fn => {
+      try {
+        return fn();
+      } catch {
+        // best-effort
+      }
+    })
+  );
+}
+
+registerFlush(flushLogs);
 
 // Restore log buffer from previous worker lifetime
 chrome.storage.local.get([LOG_STORAGE_KEY]).then(stored => {
@@ -155,8 +206,6 @@ function createDedupApiClient(baseUrl: string, key: string): ApiClient {
     // ensureTestRunFinding already deduplicates, so a few extra writes
     // after eviction are harmless.
     if (seenKeys.size >= MAX_SEEN_KEYS) {
-      const iter = seenKeys.values();
-      for (let i = 0; i < 500; i++) iter.next();
       // Sets iterate in insertion order — delete the oldest batch
       const toDelete: string[] = [];
       const it = seenKeys.values();
@@ -281,6 +330,8 @@ const SCAN_STATE_STORAGE_KEY = 'scanState';
 const EXTENSION_INSTANCE_ID_STORAGE_KEY = 'extensionInstanceId';
 let extensionInstanceId: string | null = null;
 let activeRunPromise: Promise<void> | null = null;
+let scanStarting = false; // synchronous latch — prevents race in START_SCAN handler
+let activeScanGeneration = 0; // monotonic counter — lets finalizer detect if it still owns the scan
 
 function getSerializableScanState(): ScanState {
   // Exclude latestScreenshotDataUrl from persisted state — it's large
@@ -419,8 +470,17 @@ function addEvent(type: string, message: string, findingTitle?: string) {
   sendProgressToSidePanel();
 }
 
-function sendProgressToSidePanel() {
-  void persistScanState();
+const SCAN_STATE_FLUSH_INTERVAL = 10; // persist every Nth progress update
+let scanStateSinceFlush = 0;
+
+function sendProgressToSidePanel(forcePersist = false) {
+  if (forcePersist) {
+    scanStateSinceFlush = 0;
+    void persistScanState();
+  } else if (++scanStateSinceFlush >= SCAN_STATE_FLUSH_INTERVAL) {
+    scanStateSinceFlush = 0;
+    void persistScanState();
+  }
   // Send progress without the large base64 screenshot to keep messages small.
   // Screenshots are sent via the dedicated SCREENSHOT_CAPTURED message.
   chrome.runtime
@@ -435,6 +495,13 @@ function sendProgressToSidePanel() {
       )
     );
 }
+
+function flushScanState() {
+  scanStateSinceFlush = 0;
+  return persistScanState();
+}
+
+registerFlush(flushScanState);
 
 async function loadConfig() {
   LOG('Loading config from chrome.storage.local...');
@@ -500,6 +567,7 @@ async function runScanSession(
     };
   }
 ) {
+  const myGeneration = ++activeScanGeneration;
   const environment = options?.environment;
   const resumeExisting = options?.resumeExisting ?? false;
   const scanMode = options?.scanMode;
@@ -558,7 +626,7 @@ async function runScanSession(
     scanState.phase = 'failed';
     scanState.isComplete = true;
     scanState.isRunning = false;
-    sendProgressToSidePanel();
+    sendProgressToSidePanel(true);
     return;
   }
 
@@ -788,10 +856,10 @@ async function runScanSession(
         waitForCheckpoint: async () => {
           if (!scanState.isPaused) return;
           scanState.phase = 'paused';
-          sendProgressToSidePanel();
+          sendProgressToSidePanel(true);
           await pauseController.waitIfPaused(localSignal);
           scanState.phase = 'scanning';
-          sendProgressToSidePanel();
+          sendProgressToSidePanel(true);
         },
         loginUrl: resolvedLoginUrl,
         entityCredentialId: credentialId,
@@ -820,20 +888,30 @@ async function runScanSession(
     addEvent('error', message);
     chrome.runtime.sendMessage({ type: 'SCAN_ERROR', error: message });
   } finally {
-    activeRunPromise = null;
+    // Only clean up if this session still owns the scan. A newer
+    // START_SCAN after STOP_SCAN increments activeScanGeneration,
+    // so the old finalizer must not clobber the new scan's state.
+    const ownsActiveScan = myGeneration === activeScanGeneration;
+    if (ownsActiveScan) {
+      activeRunPromise = null;
+    }
     LOG('runScanSession finally block', {
       isPaused: scanState.isPaused,
       isRunning: scanState.isRunning,
       phase: scanState.phase,
       isComplete: scanState.isComplete,
       scanId: scanState.scanId,
+      ownsActiveScan,
     });
-    if (!scanState.isPaused) {
+    if (ownsActiveScan && !scanState.isPaused) {
       scanState.isRunning = false;
       stopKeepalive();
     }
-    sendProgressToSidePanel();
+    if (ownsActiveScan) {
+      sendProgressToSidePanel(true);
+    }
     LOG('Scan finished, isRunning=', scanState.isRunning);
+    await flushAll();
   }
 }
 
@@ -878,7 +956,7 @@ async function resumePausedScan() {
   pauseController.setPaused(false);
   scanState.isPaused = false;
   scanState.phase = 'scanning';
-  sendProgressToSidePanel();
+  sendProgressToSidePanel(true);
 
   if (activeRunPromise) {
     LOG('resumePausedScan: activeRunPromise exists, just unpaused controller');
@@ -1135,6 +1213,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 
   if (message.type === 'START_SCAN' && message.url && message.runId) {
+    if (scanStarting || scanState.isRunning || activeRunPromise) {
+      LOG('START_SCAN rejected — scan already running or starting');
+      sendResponse({ ok: false, error: 'Scan already running' });
+      return true;
+    }
+    scanStarting = true;
     LOG(
       `START_SCAN: url=${message.url}, runId=${message.runId}, scanMode=${message.scanMode ?? 'full'}`
     );
@@ -1152,7 +1236,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         entityCredentialId: message.entityCredentialId,
         loginUrl: message.loginUrl,
       }
-    );
+    ).finally(() => {
+      scanStarting = false;
+    });
     sendResponse({ ok: true });
   } else if (message.type === 'PAUSE_SCAN') {
     LOG('PAUSE_SCAN — pausing at next checkpoint');
@@ -1161,7 +1247,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     scanState.phase = 'paused';
     pauseController.setPaused(true);
     addEvent('paused', 'Scan paused');
-    sendResponse({ ok: true, data: { ...scanState } });
+    void flushAll().then(() => {
+      sendResponse({ ok: true, data: { ...scanState } });
+    });
+    return true;
   } else if (message.type === 'RESUME_SCAN') {
     LOG('RESUME_SCAN — resuming scan');
     void resumePausedScan()
@@ -1183,10 +1272,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     scanState.isRunning = false;
     scanState.isComplete = true;
     scanState.phase = 'stopped';
-    activeRunPromise = null;
+    // Don't clear activeRunPromise here — let the old runScanSession
+    // finalizer clear it so it doesn't clobber a new scan's promise.
     stopKeepalive();
     addEvent('stopped', 'Scan stopped by user');
-    sendResponse({ ok: true });
+    void flushAll().then(() => {
+      sendResponse({ ok: true });
+    });
+    return true;
   } else if (message.type === 'GET_STATUS') {
     sendResponse({ ...scanState });
   } else if (message.type === 'GET_DEBUG_LOG') {

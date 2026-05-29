@@ -16,7 +16,7 @@ Cross-cutting analysis of `testomniac_runner_service`, `testomniac_extension`, `
 | 5 | [Batch writes in test-interactions/batch](#5-batch-writes-in-test-interactionsbatch-loop) | api | Critical | High | O(N) -> O(1) DB calls (requires raw SQL or upsert) |
 | 6 | [SSE stream polling efficiency](#6-sse-stream-polling-efficiency) | api | Critical | Low | 50-70% fewer queries |
 | 7 | [Batch log persistence](#7-batch-log-persistence) | extension | High | Low | 50-100x fewer writes |
-| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | Medium | Medium | 10-25% fewer DOM evals (cache strategy, not marker; measure before committing) |
+| 8 | [Cache materializeSelector results](#8-cache-materializeselector-results) | extension + runner | Medium | Medium | 10-25% fewer querySelectorAll scans (identity-stable selectors only; measure before committing) |
 | 9 | [Debounce scanState persistence](#9-debounce-scanstate-persistence) | extension | High | Low | ~9x fewer writes |
 | 10 | [Increase ApiClient cache TTL](#10-increase-apiclient-cache-ttl) | runner_service | High | Low | 100-300ms/iteration |
 | 11 | [Cache normalized HTML](#11-cache-normalized-html) | runner_service | Medium | Low | 10-50ms/interaction (only 1-2 calls hit expensive path) |
@@ -100,7 +100,7 @@ Before starting any optimization, capture baselines. After each item, re-measure
 | Batch endpoint latency | API response time for `test-interactions/batch` with N items | #5, #12 | < 500ms for N=50 |
 | SSE query load | `pg_stat_statements` query count for SSE-related queries over 1 minute | #6, #12 | < 600/min at 100 clients |
 | chrome.storage write count | Counter in `persistLog()` and `persistScanState()` over one full scan | #7, #9 | < 100 writes/scan |
-| Selector resolution time | Timer around `materializeSelector()`, log hit/miss/validation-fail rates | #8 | Strategy cache hit rate > 20% for replay selectors; validation cost < 5ms |
+| Selector resolution latency | Timer around `materializeSelector()`, log hit/miss/validation-fail rates and querySelectorAll('*') frequency | #8 | >20% of replay selectors resolve to identity-stable cache hits; p50 resolution latency reduced by >15% |
 | Browser startup time | Timer from `puppeteer.launch()` to first `page.goto()` | #14, #15 | < 1s warm, < 3s cold |
 | Index write regression | Measure insert throughput on indexed tables before/after #12 | #12 | < 10% insert latency increase |
 
@@ -370,53 +370,68 @@ The expensive `querySelectorAll(tagName || "*")` path only triggers when all fas
 
 **Why naive caching doesn't work:** `materializeSelector()` injects a synthetic `[data-tmnc-replay-target]` marker into the live DOM and returns that marker as the resolved selector. Any interaction (hover, click, type, etc.) can mutate the DOM and invalidate the marker. If we clear the cache after every interaction, there are almost no cross-interaction cache hits — `materializeSelector()` is called at the *start* of each interaction method, so the only window for a hit is between consecutive calls with no intervening interaction, which rarely happens in this scanner.
 
-**Fix:** Cache the *resolution strategy* — the stable CSS selector path discovered during the expensive `querySelectorAll` search — rather than the injected marker attribute. On cache hit, verify the element still exists via a lightweight `querySelector` check before returning it. This survives DOM mutations as long as the element itself wasn't removed.
+**Fix:** Cache only *identity-stable* selectors — those using `id`, `data-testid`, or other unique attributes that reliably identify the same element across DOM mutations. Do NOT cache generated positional paths (e.g., `div.container > button:nth-child(2)`) since these can point at a different element after mutation. On cache hit, re-validate that the element still matches the replay selector's semantic criteria (visibility + the text/role/name/href/testId fields that made it eligible during resolution).
 
 ```typescript
-private selectorStrategyCache = new Map<string, string>(); // replay selector → CSS path
+private selectorStrategyCache = new Map<string, string>(); // replay selector → stable CSS selector
 private currentTabId: number | null = null;
 
 private async materializeSelector(selector: string): Promise<string> {
   if (!selector.startsWith(REPLAY_SELECTOR_PREFIX)) return selector;
 
   const cacheKey = `${this.currentTabId}:${selector}`;
-  const cachedCssPath = this.selectorStrategyCache.get(cacheKey);
-  if (cachedCssPath) {
-    // Validate: does the element still exist at this path?
-    const exists = await this.executeScript(
-      (sel) => !!document.querySelector(sel),
-      cachedCssPath
+  const cachedSelector = this.selectorStrategyCache.get(cacheKey);
+  if (cachedSelector) {
+    // Re-validate: element exists AND still matches the replay criteria
+    const valid = await this.executeScript(
+      (sel, replayMeta) => {
+        const el = document.querySelector(sel);
+        if (!el || el.offsetParent === null) return false; // gone or hidden
+        // Check the semantic fields that made this element eligible
+        if (replayMeta.text && el.textContent?.trim() !== replayMeta.text) return false;
+        if (replayMeta.role && el.getAttribute('role') !== replayMeta.role) return false;
+        if (replayMeta.name && el.getAttribute('name') !== replayMeta.name) return false;
+        return true;
+      },
+      cachedSelector,
+      parseReplaySelector(selector) // extract text/role/name/etc from replay selector
     );
-    if (exists) return cachedCssPath;
+    if (valid) return cachedSelector;
     this.selectorStrategyCache.delete(cacheKey); // stale, fall through
   }
 
   const resolved = await this._doMaterialize(selector);
 
-  // Extract the stable CSS path used during resolution (if available)
-  // and cache it instead of the injected marker attribute
-  const stablePath = this.lastResolvedCssPath; // set by _doMaterialize
-  if (stablePath) {
-    this.selectorStrategyCache.set(cacheKey, stablePath);
+  // Only cache if the resolved path uses a stable identifier (id, data-testid, etc.)
+  // Skip positional selectors like nth-child — they can drift after DOM mutations
+  const stableSelector = this.lastResolvedStableSelector; // set by _doMaterialize
+  if (stableSelector && isIdentityStable(stableSelector)) {
+    this.selectorStrategyCache.set(cacheKey, stableSelector);
   }
 
   return resolved;
 }
 
-// Clear only on navigation and tab switch (element identity changes):
+function isIdentityStable(selector: string): boolean {
+  // Only cache selectors anchored by id, data-testid, or similar unique attributes
+  return /\[(?:id|data-testid|data-test-id)=/.test(selector) || /^#[\w-]+$/.test(selector);
+}
+
+// Clear only on navigation and tab switch (document identity changes):
 async goto(url) { this.selectorStrategyCache.clear(); ... }
 async switchToTab(tabId) { this.currentTabId = tabId; this.selectorStrategyCache.clear(); ... }
-// No clear needed after click/hover/type/select/pressKey — the
-// querySelector validation check handles stale entries.
+// No clear needed after interactions — semantic validation handles staleness.
 ```
 
-**Implementation note:** This requires `_doMaterialize()` to expose the CSS selector path it discovers during the `querySelectorAll` search (e.g., building a path like `div.container > button:nth-child(2)` from the matched element). If this is impractical, an alternative is to cache the element's `id`/`data-testid`/unique attribute found during resolution — any stable selector that doesn't depend on injected markers.
+**What gets cached and what doesn't:**
+- Cached: `#submit-btn`, `[data-testid="login-button"]`, elements resolved via `getElementById` or unique attribute lookup
+- NOT cached: `div.container > button:nth-child(2)`, `form > :nth-child(3)`, or any positional path — these can silently point at the wrong element after DOM mutation
 
-**Cache invalidation:** Only clear on `goto()` (new document) and `switchToTab()` (different document). The `querySelector` validation on cache hit handles DOM mutations without requiring aggressive clearing. This preserves cache hits across hover/click/type sequences.
+**Cache invalidation:** Only clear on `goto()` (new document) and `switchToTab()` (different document). The semantic validation on cache hit (visibility + text/role/name) catches elements that have been replaced or mutated without requiring aggressive clearing after every interaction.
 
-**Note on waitForSelector:** In the current ChromeAdapter, `waitForSelector()` calls `materializeSelector()` once *before* the polling loop (`ChromeAdapter.ts` line 512), not on every 200ms iteration. The polling loop uses the already-resolved selector for its `executeScript` checks. So caching does not help within `waitForSelector` — the benefit is across separate method calls on the same replay selector.
+**Note on waitForSelector:** In the current ChromeAdapter, `waitForSelector()` calls `materializeSelector()` once *before* the polling loop (`ChromeAdapter.ts` line 512), not on every 200ms iteration. The polling loop uses the already-resolved selector for its `executeScript` checks. Caching does not help within `waitForSelector` — the benefit is across separate method calls on the same replay selector.
 
-**Revised estimate: 10-25% fewer DOM evaluations.** The strategy cache survives across interactions (unlike the marker cache), but the validation `querySelector` call adds a small cost per hit. Net savings depend on how many replay selectors hit the expensive `querySelectorAll` path and are reused across interactions. Measure hit/miss/validation-fail rates before committing to this approach.
+**Revised estimate: 10-25% reduction in expensive `querySelectorAll('*')` scans.** The cache still performs a `querySelector` + semantic validation on hit (one `executeScript` call), so the total number of page evaluations is similar — the savings come from avoiding the expensive full-DOM scan with attribute matching. Net benefit depends on how many replay selectors resolve to identity-stable elements (those with `id` or `data-testid`). Measure hit/miss/validation-fail rates before committing.
 
 ---
 
@@ -729,7 +744,7 @@ If all critical + high priority items are implemented:
 | Discovery page analysis | ~3-12s | ~1-4s | 65% (requires #3 mutable state audit) |
 
 **Notes on revised estimates:**
-- Per-interaction improvement is modest because #1 (page decomposition) provides marginal benefit with serialized adapters (5-50ms), and #8 (selector strategy caching) has uncertain hit rate (10-25%) — measure before committing to the implementation complexity.
+- Per-interaction improvement is modest because #1 (page decomposition) provides marginal benefit with serialized adapters (5-50ms), and #8 (selector caching) reduces expensive `querySelectorAll('*')` scans but not total page evaluations (validation still requires one `executeScript` per hit). Hit rate depends on how many elements have identity-stable selectors (`id`, `data-testid`) — measure before committing.
 - Discovery page analysis improvement depends on #3 (generator parallelism), which is safe to parallelize (generators treat context as read-only; remove per-generator cache invalidation and do it once after).
 - Scan creation improvement revised from 75-80% to 50-65% because FK dependency chains limit parallelism to ~9 tiers, not 3 waves.
 - The biggest reliable wins are API-side: #2 (scan bootstrap), #4 (dashboard queries), #5 (batch writes), and #6 (SSE polling). These are independent of adapter serialization constraints.
