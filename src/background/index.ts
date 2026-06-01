@@ -1292,11 +1292,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     scanAbortController?.abort();
     pauseController.setPaused(false);
     scanState.isPaused = false;
+    // Let runTestRun() handle the stopped status via API.
+    // We still set local state for the extension UI:
     scanState.isRunning = false;
     scanState.isComplete = true;
     scanState.phase = 'stopped';
-    // Don't clear activeRunPromise here — let the old runScanSession
-    // finalizer clear it so it doesn't clobber a new scan's promise.
     stopKeepalive();
     addEvent('stopped', 'Scan stopped by user');
     void flushAll().then(() => {
