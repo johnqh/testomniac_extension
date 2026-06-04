@@ -1281,16 +1281,21 @@ export function SidePanel() {
       const createJson = await createRes.json();
       if (createJson.success && createJson.data?.id) {
         // Generate test interactions from prompt
-        await fetch(
-          `${API_URL}/api/v1/test-scenarios/${createJson.data.id}/generate`,
-          {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
+        if (runSummary?.testEnvironmentId) {
+          await fetch(
+            `${API_URL}/api/v1/test-scenarios/${createJson.data.id}/generate-sequence`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify({
+                testEnvironmentId: runSummary.testEnvironmentId,
+              }),
+            }
+          );
+        }
         setNewScenarioTitle('');
         setNewScenarioPath('');
         setNewScenarioPrompt('');
@@ -1305,6 +1310,7 @@ export function SidePanel() {
   }, [
     token,
     runSummary?.runnerId,
+    runSummary?.testEnvironmentId,
     newScenarioTitle,
     newScenarioPath,
     newScenarioPrompt,
