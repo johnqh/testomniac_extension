@@ -818,7 +818,7 @@ async function runScanSession(
       LOG(`Fetching credential ${credentialId} from API...`);
       try {
         const credRes = await fetch(
-          `${apiUrl}/api/v1/scanner/entity-credentials/${credentialId}`,
+          `${apiUrl}/api/v1/entity-credentials/${credentialId}`,
           {
             headers: apiKey
               ? { 'x-api-key': apiKey }
@@ -1040,7 +1040,7 @@ async function runScenario(
 
     // Fetch sequences for this scenario
     const seqRes = await fetch(
-      `${baseUrl}/api/v1/test-scenario-sequences?testScenarioId=${scenarioId}`,
+      `${baseUrl}/api/v1/test-scenarios/${scenarioId}/sequences`,
       { headers: { 'X-Scanner-Key': key } }
     );
     const seqJson = await seqRes.json();
