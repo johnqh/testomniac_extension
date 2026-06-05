@@ -11,7 +11,6 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth';
-import FlipNumbers from 'react-flip-numbers';
 import { LoginPage } from '@sudobility/building_blocks';
 import { Combobox, Input } from '@sudobility/components';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
@@ -21,8 +20,175 @@ import {
   resolveEnvironmentContext,
   type EnvironmentChoice,
 } from '../shared/environment';
+import { ConfigSummary } from './components/ConfigSummary';
+import { ScenariosListView } from './components/ScenariosListView';
+import {
+  ScenarioDetailView,
+  type ScenarioProgress,
+} from './components/ScenarioDetailView';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8027';
+
+/** Animated expand/collapse wrapper using CSS grid row transition */
+function AnimatedCollapse({
+  open,
+  children,
+}: {
+  open: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className='grid transition-[grid-template-rows] duration-200 ease-in-out'
+      style={{ gridTemplateRows: open ? '1fr' : '0fr' }}
+    >
+      <div className='overflow-hidden'>{children}</div>
+    </div>
+  );
+}
+
+function DetailsSection({
+  title,
+  count,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  count: number;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className='border-b border-gray-200 last:border-0'>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className='w-full flex items-center justify-between px-2 py-1.5 bg-gray-50 hover:bg-gray-100 text-xs font-medium text-gray-700'
+      >
+        <span>{title}</span>
+        <span className='flex items-center gap-1'>
+          <span className='text-[10px] font-normal text-gray-500'>{count}</span>
+          <span
+            className='text-gray-400 transition-transform duration-200'
+            style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          >
+            {'\u25BE'}
+          </span>
+        </span>
+      </button>
+      <AnimatedCollapse open={open}>{children}</AnimatedCollapse>
+    </div>
+  );
+}
+
+function CollapsibleRow({
+  label,
+  badge,
+  status,
+  indent,
+  children,
+}: {
+  label: string;
+  badge?: string;
+  status?: string;
+  indent?: boolean;
+  children?: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const hasChildren =
+    children != null && (Array.isArray(children) ? children.length > 0 : true);
+  return (
+    <div className={indent ? 'ml-2' : ''}>
+      <button
+        onClick={() => hasChildren && setOpen(o => !o)}
+        className={`w-full text-left flex items-center justify-between gap-1 px-2 py-1 border-b border-gray-100 text-[10px] font-mono ${
+          hasChildren ? 'hover:bg-gray-50 cursor-pointer' : 'cursor-default'
+        }`}
+      >
+        <span className='text-gray-700 truncate min-w-0'>{label}</span>
+        <span className='flex items-center gap-1 shrink-0'>
+          {badge && (
+            <span className='rounded bg-slate-200 px-1 py-0.5 text-[9px] uppercase text-slate-600'>
+              {badge}
+            </span>
+          )}
+          {status && (
+            <span
+              className={`text-[9px] ${status === 'completed' ? 'text-green-600' : status === 'failed' ? 'text-red-600' : 'text-gray-500'}`}
+            >
+              {status}
+            </span>
+          )}
+          {hasChildren && (
+            <span
+              className='text-gray-400 text-[9px] transition-transform duration-200'
+              style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+            >
+              {'\u25BE'}
+            </span>
+          )}
+        </span>
+      </button>
+      <AnimatedCollapse open={open}>{children}</AnimatedCollapse>
+    </div>
+  );
+}
+
+function CollapsibleEventRow({
+  event,
+  context,
+  testInteractionRunId,
+}: {
+  event: { type: string; message: string; timestamp: number };
+  context: any;
+  testInteractionRunId?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      className='px-2 py-0.5 border-b border-gray-100 last:border-0 cursor-pointer hover:bg-gray-50'
+      onClick={() => setOpen(o => !o)}
+    >
+      <div>
+        <span className='text-gray-400'>
+          {new Date(event.timestamp).toLocaleTimeString()}
+        </span>{' '}
+        <span className='text-blue-600'>{event.type}</span>{' '}
+        <span className='text-gray-600'>{event.message}</span>
+      </div>
+      <AnimatedCollapse open={open && !!context}>
+        <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-gray-500'>
+          <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
+            {context?.testType}
+          </span>
+          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+            {context?.surfaceTitle}
+          </span>
+          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+            element #{context?.testInteractionId}
+          </span>
+          {testInteractionRunId && (
+            <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+              run #{testInteractionRunId}
+            </span>
+          )}
+          {context?.startingPath && (
+            <span className='rounded bg-gray-100 px-1.5 py-0.5'>
+              {context.startingPath}
+            </span>
+          )}
+        </div>
+        <div className='mt-0.5 text-gray-700 break-words'>
+          {context?.title}
+          {context?.durationMs != null ? ` \u00B7 ${context.durationMs}ms` : ''}
+          {context?.findingsCount > 0
+            ? ` \u00B7 ${context.findingsCount} finding${context.findingsCount === 1 ? '' : 's'}`
+            : ''}
+        </div>
+      </AnimatedCollapse>
+    </div>
+  );
+}
 
 function logPanel(step: string, details?: Record<string, unknown>): void {
   console.log('[SidePanel]', step, details ?? {});
@@ -289,8 +455,8 @@ const initialProgress: ScanProgress = {
   events: [],
 };
 
-type ResultTab = 'overview' | 'map' | 'coverage' | 'issues' | 'events';
-type AppView = 'home' | 'scenarios';
+type ResultTab = 'overview' | 'issues' | 'details';
+type AppView = 'home' | 'scenarios' | 'scenario-detail';
 
 const EXPERTISE_OPTIONS: ExpertiseOption[] = [
   { slug: 'tester', label: 'Tester', required: true },
@@ -469,7 +635,16 @@ export function SidePanel() {
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
   const [appView, setAppView] = useState<AppView>('home');
-  const [showSettings, setShowSettings] = useState(false);
+  const [showSettings, setShowSettings] = usePersistedState<boolean>(
+    'showSettings',
+    true,
+    chromeStorageAdapter
+  );
+  const [configExpanded, setConfigExpanded] = usePersistedState<boolean>(
+    'configExpanded',
+    true,
+    chromeStorageAdapter
+  );
   const [settingsApiUrl, setSettingsApiUrl] = useState('');
   const [settingsApiKey, setSettingsApiKey] = useState('');
   const [settingsClickWaitMs, setSettingsClickWaitMs] = useState('500');
@@ -484,14 +659,14 @@ export function SidePanel() {
   }
   const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
   const [loadingScenarios, setLoadingScenarios] = useState(false);
-  const [showNewScenarioForm, setShowNewScenarioForm] = useState(false);
-  const [newScenarioTitle, setNewScenarioTitle] = useState('');
-  const [newScenarioPath, setNewScenarioPath] = useState('');
-  const [newScenarioPrompt, setNewScenarioPrompt] = useState('');
-  const [creatingScenario, setCreatingScenario] = useState(false);
   const [runningScenarioId, setRunningScenarioId] = useState<number | null>(
     null
   );
+  const [selectedScenario, setSelectedScenario] = useState<ScenarioItem | null>(
+    null
+  );
+  const [scenarioProgress, setScenarioProgress] =
+    useState<ScenarioProgress | null>(null);
 
   // Load settings from storage when settings panel opens
   useEffect(() => {
@@ -806,6 +981,7 @@ export function SidePanel() {
 
   // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
+    setConfigExpanded(false);
     console.log('[SidePanel] handleTestCurrentPage called', {
       activeTabUrl,
       hasToken: !!token,
@@ -1027,6 +1203,7 @@ export function SidePanel() {
     selectedCredentialId,
     loginUrl,
     scanMode,
+    setConfigExpanded,
   ]);
 
   // Auto-scroll event log
@@ -1095,6 +1272,20 @@ export function SidePanel() {
           String((message as { error?: string }).error || 'Scan failed')
         );
         setIsScanning(false);
+      }
+      if (message.type === 'SCENARIO_PROGRESS') {
+        const msg = message as Record<string, unknown>;
+        setScenarioProgress({
+          step: (msg.step as number) ?? 0,
+          totalSteps: (msg.totalSteps as number) ?? 0,
+          status:
+            (msg.status as 'running' | 'completed' | 'error') ?? 'running',
+          interactionId: msg.interactionId as number | undefined,
+          error: msg.error as string | undefined,
+        });
+        if (msg.status === 'completed' || msg.status === 'error') {
+          setRunningScenarioId(null);
+        }
       }
     };
     chrome.runtime.onMessage.addListener(listener);
@@ -1256,64 +1447,29 @@ export function SidePanel() {
     if (appView === 'scenarios') void fetchScenarios();
   }, [appView, fetchScenarios]);
 
-  const handleCreateScenario = useCallback(async () => {
-    const runnerId = runSummary?.runnerId;
-    if (!token || !runnerId || !newScenarioTitle.trim()) return;
-    setCreatingScenario(true);
-    try {
-      // Create scenario
-      const createRes = await fetch(
-        `${API_URL}/api/v1/runners/${runnerId}/test-scenarios`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            runnerId,
-            title: newScenarioTitle.trim(),
-            startingPath: newScenarioPath.trim() || '/',
-            prompt: newScenarioPrompt.trim(),
-          }),
-        }
-      );
-      const createJson = await createRes.json();
-      if (createJson.success && createJson.data?.id) {
-        // Generate test interactions from prompt
-        if (runSummary?.testEnvironmentId) {
-          await fetch(
-            `${API_URL}/api/v1/test-scenarios/${createJson.data.id}/generate-sequence`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${token}`,
-              },
-              body: JSON.stringify({
-                testEnvironmentId: runSummary.testEnvironmentId,
-              }),
-            }
-          );
-        }
-        setNewScenarioTitle('');
-        setNewScenarioPath('');
-        setNewScenarioPrompt('');
-        setShowNewScenarioForm(false);
-        void fetchScenarios();
-      }
-    } catch {
-      // ignore
-    } finally {
-      setCreatingScenario(false);
+  // Fetch scenarios when scan completes
+  useEffect(() => {
+    if (progress.isComplete && runSummary?.runnerId) {
+      void fetchScenarios();
+    }
+  }, [progress.isComplete, runSummary?.runnerId, fetchScenarios]);
+
+  // Auto-detect: switch to scenarios view when runner exists and not scanning
+  useEffect(() => {
+    if (
+      runSummary?.runnerId &&
+      !isScanning &&
+      !progress.isComplete &&
+      appView === 'home'
+    ) {
+      setAppView('scenarios');
+      void fetchScenarios();
     }
   }, [
-    token,
     runSummary?.runnerId,
-    runSummary?.testEnvironmentId,
-    newScenarioTitle,
-    newScenarioPath,
-    newScenarioPrompt,
+    isScanning,
+    progress.isComplete,
+    appView,
     fetchScenarios,
   ]);
 
@@ -1321,7 +1477,10 @@ export function SidePanel() {
     async (scenario: ScenarioItem) => {
       const runnerId = runSummary?.runnerId;
       if (!runnerId || isScanning || runningScenarioId != null) return;
+      setSelectedScenario(scenario);
+      setAppView('scenario-detail');
       setRunningScenarioId(scenario.id);
+      setScenarioProgress({ step: 0, totalSteps: 0, status: 'running' });
       try {
         chrome.runtime.sendMessage({
           type: 'START_SCENARIO',
@@ -1332,6 +1491,7 @@ export function SidePanel() {
         });
       } catch {
         setRunningScenarioId(null);
+        setScenarioProgress(null);
       }
     },
     [runSummary, isScanning, runningScenarioId]
@@ -1544,7 +1704,7 @@ export function SidePanel() {
             {user?.email}
           </span>
           <button
-            onClick={() => setShowSettings(s => !s)}
+            onClick={() => setShowSettings(!showSettings)}
             className={`${showSettings ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
             title='Settings'
           >
@@ -1633,345 +1793,387 @@ export function SidePanel() {
         </div>
       )}
 
-      {/* Workspace & Product selectors */}
+      {/* Config: collapsed summary or expanded form */}
+      {!isScanning &&
+        !!(selectedEntityId && selectedProductId) &&
+        !configExpanded && (
+          <ConfigSummary
+            entityName={
+              entityOptions.find(e => e.value === selectedEntityId)?.label ?? ''
+            }
+            productName={
+              productOptions.find(p => p.value === selectedProductId)?.label ??
+              ''
+            }
+            environmentLabel={
+              isLocalEnvironment
+                ? `Local (${activeHostname})`
+                : resolvedEnvironmentLabel || activeHostname || ''
+            }
+            scanMode={scanMode}
+            expertiseCount={selectedExpertiseSlugs.length}
+            totalExpertises={EXPERTISE_OPTIONS.length}
+            onExpand={() => setConfigExpanded(true)}
+          />
+        )}
       {!isScanning && (
-        <div className='space-y-2'>
-          <div>
-            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-              Workspace
-            </label>
-            <Combobox
-              options={entityOptions}
-              value={selectedEntityId || ''}
-              onChange={value => {
-                setSelectedEntityId(value);
-                setSelectedProductId('');
-              }}
-              placeholder={loadingEntities ? 'Loading...' : 'Select workspace'}
-              disabled={loadingEntities}
-              emptyMessage='No workspaces found'
-              className='w-full'
-            />
-          </div>
+        <AnimatedCollapse
+          open={!(selectedEntityId && selectedProductId) || configExpanded}
+        >
+          <div className='space-y-2'>
+            {!!(selectedEntityId && selectedProductId) && (
+              <button
+                onClick={() => setConfigExpanded(false)}
+                className='text-[10px] text-blue-600 hover:text-blue-700 font-medium'
+              >
+                Collapse
+              </button>
+            )}
+            <div>
+              <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                Workspace
+              </label>
+              <Combobox
+                options={entityOptions}
+                value={selectedEntityId || ''}
+                onChange={value => {
+                  setSelectedEntityId(value);
+                  setSelectedProductId('');
+                }}
+                placeholder={
+                  loadingEntities ? 'Loading...' : 'Select workspace'
+                }
+                disabled={loadingEntities}
+                emptyMessage='No workspaces found'
+                className='w-full'
+              />
+            </div>
 
-          <div>
-            <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-              Product
-            </label>
-            <Combobox
-              options={productOptions}
-              value={selectedProductId}
-              onChange={value => setSelectedProductId(value)}
-              placeholder={loadingProducts ? 'Loading...' : 'Select product...'}
-              disabled={loadingProducts}
-              emptyMessage='No products — select "Create Product"'
-              className='w-full'
-            />
-          </div>
+            <div>
+              <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                Product
+              </label>
+              <Combobox
+                options={productOptions}
+                value={selectedProductId}
+                onChange={value => setSelectedProductId(value)}
+                placeholder={
+                  loadingProducts ? 'Loading...' : 'Select product...'
+                }
+                disabled={loadingProducts}
+                emptyMessage='No products — select "Create Product"'
+                className='w-full'
+              />
+            </div>
 
-          {activeTabUrl && (
-            <>
-              <div>
-                <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-                  Environment
-                </label>
-                {isLocalEnvironment ? (
-                  <div className='rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>
-                    Local environment for {user?.email || 'current user'} on{' '}
-                    {activeHostname}
-                  </div>
-                ) : (
-                  <div className='space-y-2'>
-                    <Combobox
-                      options={environmentOptions}
-                      value={selectedEnvironment}
-                      onChange={value =>
-                        setSelectedEnvironment(value as EnvironmentChoice)
-                      }
-                      placeholder='Select environment'
-                      emptyMessage='No environments found'
-                      className='w-full'
-                    />
-                    {selectedEnvironment === 'custom' && (
-                      <Input
-                        value={customEnvironmentLabel}
-                        onChange={e =>
-                          setCustomEnvironmentLabel(e.target.value)
+            {activeTabUrl && (
+              <>
+                <div>
+                  <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                    Environment
+                  </label>
+                  {isLocalEnvironment ? (
+                    <div className='rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700'>
+                      Local environment for {user?.email || 'current user'} on{' '}
+                      {activeHostname}
+                    </div>
+                  ) : (
+                    <div className='space-y-2'>
+                      <Combobox
+                        options={environmentOptions}
+                        value={selectedEnvironment}
+                        onChange={value =>
+                          setSelectedEnvironment(value as EnvironmentChoice)
                         }
-                        placeholder='Enter environment label'
+                        placeholder='Select environment'
+                        emptyMessage='No environments found'
+                        className='w-full'
                       />
+                      {selectedEnvironment === 'custom' && (
+                        <Input
+                          value={customEnvironmentLabel}
+                          onChange={e =>
+                            setCustomEnvironmentLabel(e.target.value)
+                          }
+                          placeholder='Enter environment label'
+                        />
+                      )}
+                      <div className='text-[10px] text-gray-500'>
+                        Scans for {activeHostname} will be stored under{' '}
+                        <span className='font-medium text-gray-700'>
+                          {resolvedEnvironmentLabel || 'an environment label'}
+                        </span>
+                        .
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <label className='block text-[11px] font-medium text-gray-500 mb-1'>
+                    Expertises
+                  </label>
+                  <div className='rounded-md border border-gray-200 bg-gray-50 px-2 py-2 space-y-1.5'>
+                    {EXPERTISE_OPTIONS.map(option => {
+                      const checked = selectedExpertiseSlugs.includes(
+                        option.slug
+                      );
+                      return (
+                        <label
+                          key={option.slug}
+                          className='flex items-center justify-between gap-2 text-[11px] text-gray-700'
+                        >
+                          <span>
+                            {option.label}
+                            {option.required ? ' (required)' : ''}
+                          </span>
+                          <input
+                            type='checkbox'
+                            checked={checked}
+                            disabled={option.required}
+                            onChange={event => {
+                              if (option.required) return;
+                              setSelectedExpertiseSlugs(prev =>
+                                event.target.checked
+                                  ? [...prev, option.slug]
+                                  : prev.filter(slug => slug !== option.slug)
+                              );
+                            }}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Scan Mode */}
+                <div>
+                  <div className='text-[11px] font-medium text-gray-700 mb-1'>
+                    Scan depth
+                  </div>
+                  <div className='flex gap-1'>
+                    {(
+                      [
+                        { value: 'full', label: 'Full' },
+                        { value: 'partial', label: 'Partial' },
+                        { value: 'minimum', label: 'Minimum' },
+                      ] as const
+                    ).map(opt => (
+                      <button
+                        key={opt.value}
+                        onClick={() => setScanMode(opt.value)}
+                        className={`flex-1 text-[10px] font-medium py-1 rounded border transition-colors ${
+                          scanMode === opt.value
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className='text-[10px] text-gray-500 mt-1'>
+                    {scanMode === 'full' &&
+                      'Run all interactions including hover'}
+                    {scanMode === 'partial' && 'Skip hover interactions'}
+                    {scanMode === 'minimum' && 'Navigation only — fastest'}
+                  </p>
+                </div>
+
+                {/* Continue with login */}
+                <div>
+                  <label className='flex items-center gap-2 text-[11px] font-medium text-gray-700 cursor-pointer'>
+                    <input
+                      type='checkbox'
+                      checked={continueWithLogin}
+                      onChange={e => {
+                        setContinueWithLogin(e.target.checked);
+                        if (!e.target.checked) {
+                          setSelectedCredentialId('');
+                          setLoginUrl('');
+                          setShowNewCredentialForm(false);
+                        }
+                      }}
+                    />
+                    Continue with login
+                  </label>
+                </div>
+
+                {continueWithLogin && (
+                  <div className='rounded-md border border-gray-200 bg-gray-50 px-3 py-2 space-y-2'>
+                    <div>
+                      <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
+                        Credential
+                      </label>
+                      <Combobox
+                        options={[
+                          ...credentials.map(c => ({
+                            value: String(c.id),
+                            label: `${c.label} (${c.email || c.username || c.authProvider})`,
+                          })),
+                          { value: '__new__', label: '+ Add new' },
+                        ]}
+                        value={selectedCredentialId}
+                        onChange={value => {
+                          setSelectedCredentialId(value);
+                          setShowNewCredentialForm(value === '__new__');
+                          // Pre-fill loginUrl from selected credential
+                          if (value !== '__new__') {
+                            const cred = credentials.find(
+                              c => String(c.id) === value
+                            );
+                            if (cred?.loginUrl && !loginUrl) {
+                              setLoginUrl(cred.loginUrl);
+                            }
+                          }
+                        }}
+                        placeholder={
+                          loadingCredentials
+                            ? 'Loading...'
+                            : 'Select credential...'
+                        }
+                        disabled={loadingCredentials}
+                        emptyMessage='No credentials — add a new one'
+                        className='w-full'
+                      />
+                    </div>
+
+                    {showNewCredentialForm && (
+                      <div className='space-y-1.5 border-t border-gray-200 pt-2'>
+                        <div>
+                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                            Label
+                          </label>
+                          <input
+                            type='text'
+                            value={newCredLabel}
+                            onChange={e => setNewCredLabel(e.target.value)}
+                            placeholder='e.g. Admin account'
+                            className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+                          />
+                        </div>
+                        <div>
+                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                            Email
+                          </label>
+                          <input
+                            type='email'
+                            value={newCredEmail}
+                            onChange={e => setNewCredEmail(e.target.value)}
+                            placeholder='user@example.com'
+                            className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+                          />
+                        </div>
+                        <div>
+                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                            Password
+                          </label>
+                          <input
+                            type='password'
+                            value={newCredPassword}
+                            onChange={e => setNewCredPassword(e.target.value)}
+                            placeholder='Password'
+                            className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+                          />
+                        </div>
+                        <div>
+                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                            Auth Provider
+                          </label>
+                          <Combobox
+                            options={AUTH_PROVIDER_OPTIONS}
+                            value={newCredAuthProvider}
+                            onChange={value => setNewCredAuthProvider(value)}
+                            placeholder='Select provider'
+                            emptyMessage='No providers'
+                            className='w-full'
+                          />
+                        </div>
+                        <button
+                          onClick={async () => {
+                            if (
+                              !newCredLabel.trim() ||
+                              !selectedEntity ||
+                              !token
+                            )
+                              return;
+                            setSavingCredential(true);
+                            try {
+                              const res = await fetch(
+                                `${API_URL}/api/v1/entities/${selectedEntity.entitySlug}/credentials`,
+                                {
+                                  method: 'POST',
+                                  headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${token}`,
+                                  },
+                                  body: JSON.stringify({
+                                    entityId: selectedEntity.id,
+                                    label: newCredLabel.trim(),
+                                    email: newCredEmail.trim() || undefined,
+                                    password: newCredPassword || undefined,
+                                    authProvider: newCredAuthProvider,
+                                  }),
+                                }
+                              );
+                              const data = await res.json();
+                              if (data.success && data.data) {
+                                await fetchCredentials();
+                                setSelectedCredentialId(String(data.data.id));
+                                setShowNewCredentialForm(false);
+                                setNewCredLabel('');
+                                setNewCredEmail('');
+                                setNewCredPassword('');
+                                setNewCredAuthProvider('email_password');
+                                if (data.data.loginUrl && !loginUrl) {
+                                  setLoginUrl(data.data.loginUrl);
+                                }
+                              } else {
+                                setError(
+                                  normalizeApiError(
+                                    data,
+                                    'Failed to save credential'
+                                  )
+                                );
+                              }
+                            } catch (err) {
+                              logPanel('save-credential:failed', {
+                                error:
+                                  err instanceof Error
+                                    ? err.message
+                                    : String(err),
+                              });
+                              setError('Failed to save credential');
+                            } finally {
+                              setSavingCredential(false);
+                            }
+                          }}
+                          disabled={savingCredential || !newCredLabel.trim()}
+                          className='w-full bg-blue-600 text-white text-xs font-medium py-1.5 rounded hover:bg-blue-700 disabled:bg-blue-400'
+                        >
+                          {savingCredential ? 'Saving...' : 'Save Credential'}
+                        </button>
+                      </div>
                     )}
-                    <div className='text-[10px] text-gray-500'>
-                      Scans for {activeHostname} will be stored under{' '}
-                      <span className='font-medium text-gray-700'>
-                        {resolvedEnvironmentLabel || 'an environment label'}
-                      </span>
-                      .
+
+                    <div>
+                      <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                        Login URL (optional)
+                      </label>
+                      <input
+                        type='text'
+                        value={loginUrl}
+                        onChange={e => setLoginUrl(e.target.value)}
+                        placeholder='https://example.com/login'
+                        className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
+                      />
                     </div>
                   </div>
                 )}
-              </div>
-
-              <div>
-                <label className='block text-[11px] font-medium text-gray-500 mb-1'>
-                  Expertises
-                </label>
-                <div className='rounded-md border border-gray-200 bg-gray-50 px-2 py-2 space-y-1.5'>
-                  {EXPERTISE_OPTIONS.map(option => {
-                    const checked = selectedExpertiseSlugs.includes(
-                      option.slug
-                    );
-                    return (
-                      <label
-                        key={option.slug}
-                        className='flex items-center justify-between gap-2 text-[11px] text-gray-700'
-                      >
-                        <span>
-                          {option.label}
-                          {option.required ? ' (required)' : ''}
-                        </span>
-                        <input
-                          type='checkbox'
-                          checked={checked}
-                          disabled={option.required}
-                          onChange={event => {
-                            if (option.required) return;
-                            setSelectedExpertiseSlugs(prev =>
-                              event.target.checked
-                                ? [...prev, option.slug]
-                                : prev.filter(slug => slug !== option.slug)
-                            );
-                          }}
-                        />
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Scan Mode */}
-              <div>
-                <div className='text-[11px] font-medium text-gray-700 mb-1'>
-                  Scan depth
-                </div>
-                <div className='flex gap-1'>
-                  {(
-                    [
-                      { value: 'full', label: 'Full' },
-                      { value: 'partial', label: 'Partial' },
-                      { value: 'minimum', label: 'Minimum' },
-                    ] as const
-                  ).map(opt => (
-                    <button
-                      key={opt.value}
-                      onClick={() => setScanMode(opt.value)}
-                      className={`flex-1 text-[10px] font-medium py-1 rounded border transition-colors ${
-                        scanMode === opt.value
-                          ? 'bg-blue-600 text-white border-blue-600'
-                          : 'bg-white text-gray-600 border-gray-300 hover:border-gray-400'
-                      }`}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <p className='text-[10px] text-gray-500 mt-1'>
-                  {scanMode === 'full' &&
-                    'Run all interactions including hover'}
-                  {scanMode === 'partial' && 'Skip hover interactions'}
-                  {scanMode === 'minimum' && 'Navigation only — fastest'}
-                </p>
-              </div>
-
-              {/* Continue with login */}
-              <div>
-                <label className='flex items-center gap-2 text-[11px] font-medium text-gray-700 cursor-pointer'>
-                  <input
-                    type='checkbox'
-                    checked={continueWithLogin}
-                    onChange={e => {
-                      setContinueWithLogin(e.target.checked);
-                      if (!e.target.checked) {
-                        setSelectedCredentialId('');
-                        setLoginUrl('');
-                        setShowNewCredentialForm(false);
-                      }
-                    }}
-                  />
-                  Continue with login
-                </label>
-              </div>
-
-              {continueWithLogin && (
-                <div className='rounded-md border border-gray-200 bg-gray-50 px-3 py-2 space-y-2'>
-                  <div>
-                    <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-                      Credential
-                    </label>
-                    <Combobox
-                      options={[
-                        ...credentials.map(c => ({
-                          value: String(c.id),
-                          label: `${c.label} (${c.email || c.username || c.authProvider})`,
-                        })),
-                        { value: '__new__', label: '+ Add new' },
-                      ]}
-                      value={selectedCredentialId}
-                      onChange={value => {
-                        setSelectedCredentialId(value);
-                        setShowNewCredentialForm(value === '__new__');
-                        // Pre-fill loginUrl from selected credential
-                        if (value !== '__new__') {
-                          const cred = credentials.find(
-                            c => String(c.id) === value
-                          );
-                          if (cred?.loginUrl && !loginUrl) {
-                            setLoginUrl(cred.loginUrl);
-                          }
-                        }
-                      }}
-                      placeholder={
-                        loadingCredentials
-                          ? 'Loading...'
-                          : 'Select credential...'
-                      }
-                      disabled={loadingCredentials}
-                      emptyMessage='No credentials — add a new one'
-                      className='w-full'
-                    />
-                  </div>
-
-                  {showNewCredentialForm && (
-                    <div className='space-y-1.5 border-t border-gray-200 pt-2'>
-                      <div>
-                        <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                          Label
-                        </label>
-                        <input
-                          type='text'
-                          value={newCredLabel}
-                          onChange={e => setNewCredLabel(e.target.value)}
-                          placeholder='e.g. Admin account'
-                          className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                        />
-                      </div>
-                      <div>
-                        <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                          Email
-                        </label>
-                        <input
-                          type='email'
-                          value={newCredEmail}
-                          onChange={e => setNewCredEmail(e.target.value)}
-                          placeholder='user@example.com'
-                          className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                        />
-                      </div>
-                      <div>
-                        <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                          Password
-                        </label>
-                        <input
-                          type='password'
-                          value={newCredPassword}
-                          onChange={e => setNewCredPassword(e.target.value)}
-                          placeholder='Password'
-                          className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                        />
-                      </div>
-                      <div>
-                        <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                          Auth Provider
-                        </label>
-                        <Combobox
-                          options={AUTH_PROVIDER_OPTIONS}
-                          value={newCredAuthProvider}
-                          onChange={value => setNewCredAuthProvider(value)}
-                          placeholder='Select provider'
-                          emptyMessage='No providers'
-                          className='w-full'
-                        />
-                      </div>
-                      <button
-                        onClick={async () => {
-                          if (!newCredLabel.trim() || !selectedEntity || !token)
-                            return;
-                          setSavingCredential(true);
-                          try {
-                            const res = await fetch(
-                              `${API_URL}/api/v1/entities/${selectedEntity.entitySlug}/credentials`,
-                              {
-                                method: 'POST',
-                                headers: {
-                                  'Content-Type': 'application/json',
-                                  Authorization: `Bearer ${token}`,
-                                },
-                                body: JSON.stringify({
-                                  entityId: selectedEntity.id,
-                                  label: newCredLabel.trim(),
-                                  email: newCredEmail.trim() || undefined,
-                                  password: newCredPassword || undefined,
-                                  authProvider: newCredAuthProvider,
-                                }),
-                              }
-                            );
-                            const data = await res.json();
-                            if (data.success && data.data) {
-                              await fetchCredentials();
-                              setSelectedCredentialId(String(data.data.id));
-                              setShowNewCredentialForm(false);
-                              setNewCredLabel('');
-                              setNewCredEmail('');
-                              setNewCredPassword('');
-                              setNewCredAuthProvider('email_password');
-                              if (data.data.loginUrl && !loginUrl) {
-                                setLoginUrl(data.data.loginUrl);
-                              }
-                            } else {
-                              setError(
-                                normalizeApiError(
-                                  data,
-                                  'Failed to save credential'
-                                )
-                              );
-                            }
-                          } catch (err) {
-                            logPanel('save-credential:failed', {
-                              error:
-                                err instanceof Error
-                                  ? err.message
-                                  : String(err),
-                            });
-                            setError('Failed to save credential');
-                          } finally {
-                            setSavingCredential(false);
-                          }
-                        }}
-                        disabled={savingCredential || !newCredLabel.trim()}
-                        className='w-full bg-blue-600 text-white text-xs font-medium py-1.5 rounded hover:bg-blue-700 disabled:bg-blue-400'
-                      >
-                        {savingCredential ? 'Saving...' : 'Save Credential'}
-                      </button>
-                    </div>
-                  )}
-
-                  <div>
-                    <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                      Login URL (optional)
-                    </label>
-                    <input
-                      type='text'
-                      value={loginUrl}
-                      onChange={e => setLoginUrl(e.target.value)}
-                      placeholder='https://example.com/login'
-                      className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                    />
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+              </>
+            )}
+          </div>
+        </AnimatedCollapse>
       )}
 
       {/* Test Current Page Button + Scenarios */}
@@ -1991,14 +2193,6 @@ export function SidePanel() {
               ? 'Submitting...'
               : `Test ${new URL(activeTabUrl).hostname}`}
           </button>
-          {runSummary?.runnerId && (
-            <button
-              onClick={() => setAppView('scenarios')}
-              className='w-full py-1.5 px-3 text-xs font-medium rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50'
-            >
-              Scenarios
-            </button>
-          )}
         </div>
       )}
 
@@ -2094,65 +2288,31 @@ export function SidePanel() {
           {(
             [
               {
-                key: 'map',
                 label: 'Pages',
                 value: progress.pagesFound,
                 color: 'text-blue-600',
-                ring: 'ring-blue-300',
               },
               {
-                key: 'overview',
                 label: 'States',
                 value: progress.pageStatesFound,
                 color: 'text-purple-600',
-                ring: 'ring-purple-300',
               },
               {
-                key: 'coverage',
                 label: 'Tests',
                 value: progress.testRunsCompleted,
                 color: 'text-green-600',
-                ring: 'ring-green-300',
               },
-              {
-                key: 'issues',
-                label: 'Errors',
-                value: errorCount,
-                color: 'text-red-600',
-                ring: 'ring-red-300',
-              },
+              { label: 'Errors', value: errorCount, color: 'text-red-600' },
             ] as const
           ).map(c => (
-            <button
-              key={c.key}
-              onClick={() => setResultTab(c.key)}
-              className={`text-center py-1.5 rounded-md transition-colors ${
-                resultTab === c.key
-                  ? `bg-white ring-2 ${c.ring} shadow-sm`
-                  : 'hover:bg-gray-50'
-              }`}
-            >
-              <div className={`text-lg font-bold ${c.color}`}>
-                <div className='flex items-center justify-center font-mono tabular-nums'>
-                  <FlipNumbers
-                    key={`${c.key}-${c.value}`}
-                    height={18}
-                    width={12}
-                    color='currentColor'
-                    background='transparent'
-                    numbers={String(c.value)}
-                    play
-                    perspective={120}
-                    duration={0.35}
-                    numberStyle={{
-                      fontSize: '1.125rem',
-                      fontWeight: 700,
-                    }}
-                  />
-                </div>
+            <div key={c.label} className='text-center py-1.5'>
+              <div
+                className={`text-lg font-bold font-mono tabular-nums ${c.color}`}
+              >
+                {c.value}
               </div>
               <div className='text-[10px] text-gray-500'>{c.label}</div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -2163,10 +2323,8 @@ export function SidePanel() {
           {(
             [
               { key: 'overview', label: 'Overview' },
-              { key: 'map', label: 'Navigation' },
-              { key: 'issues', label: 'Errors' },
-              { key: 'coverage', label: 'Coverage' },
-              { key: 'events', label: 'All Events' },
+              { key: 'issues', label: 'Issues' },
+              { key: 'details', label: 'Details' },
             ] as const
           ).map(tab => (
             <button
@@ -2243,41 +2401,6 @@ export function SidePanel() {
             </div>
           )}
 
-          {resultTab === 'map' && (
-            <div
-              ref={eventLogRef}
-              className='flex-1 overflow-y-auto font-mono text-[10px]'
-            >
-              {(navigationMap?.discoveredPages ?? []).map(page => {
-                const visit = navigationMap?.pageVisits.find(
-                  item => item.relativePath === page.relativePath
-                );
-                return (
-                  <div
-                    key={page.id}
-                    className='px-2 py-1 border-b border-gray-100 last:border-0'
-                  >
-                    <div className='flex items-center justify-between gap-2'>
-                      <span className='text-gray-700'>{page.relativePath}</span>
-                      <span className='text-blue-600'>
-                        {visit?.status ?? 'discovered'}
-                      </span>
-                    </div>
-                    <div className='mt-0.5 text-gray-500 leading-4'>
-                      from {page.sourcePagePath || 'root'}
-                      {page.sourceLabel ? ` via ${page.sourceLabel}` : ''}
-                    </div>
-                  </div>
-                );
-              })}
-              {(navigationMap?.discoveredPages.length ?? 0) === 0 && (
-                <div className='p-3 text-center text-gray-400'>
-                  No navigation map yet
-                </div>
-              )}
-            </div>
-          )}
-
           {resultTab === 'issues' && (
             <div
               ref={eventLogRef}
@@ -2302,173 +2425,151 @@ export function SidePanel() {
               ))}
               {findingRows.length === 0 && (
                 <div className='p-3 text-center text-gray-400'>
-                  No errors yet
+                  No issues yet
                 </div>
               )}
             </div>
           )}
 
-          {resultTab === 'coverage' && (
-            <div
-              ref={eventLogRef}
-              className='flex-1 overflow-y-auto font-mono text-[10px]'
-            >
-              {runStructure && (
-                <div className='border-b border-gray-100 px-2 py-1.5 bg-gray-50'>
-                  <div className='text-gray-700 font-semibold'>
-                    Bundle: {runStructure.bundle.title}
-                  </div>
-                  <div className='text-gray-500'>
-                    Run {runStructure.bundleRun.id} ·{' '}
-                    {runStructure.bundleRun.status}
-                  </div>
-                </div>
-              )}
-              {(runStructure?.surfaces ?? []).map(surface => (
-                <div
-                  key={surface.id}
-                  className='border-b border-gray-100 last:border-0'
-                >
-                  <div className='px-2 py-1 bg-white border-b border-gray-100'>
-                    <div className='flex items-center justify-between gap-2'>
-                      <span className='text-gray-800'>{surface.title}</span>
-                      <span className='text-green-600'>
-                        {surface.surfaceRuns
-                          .map(run => run.status)
-                          .join(', ') || 'pending'}
-                      </span>
-                    </div>
-                    <div className='text-gray-500'>
-                      {surface.testInteractions.length} element
-                      {surface.testInteractions.length === 1 ? '' : 's'}
-                    </div>
-                  </div>
-                  {surface.testInteractions.map(testInteraction => (
-                    <div
-                      key={testInteraction.id}
-                      className='px-3 py-1 border-b border-gray-50 last:border-0 bg-gray-50/50'
-                    >
-                      <div className='flex items-start justify-between gap-2'>
-                        <div className='min-w-0'>
-                          <div className='text-gray-700 break-words'>
-                            {testInteraction.title}
-                          </div>
-                          <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px]'>
-                            <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
-                              {testInteraction.testType}
-                            </span>
-                            <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
-                              element #{testInteraction.id}
-                            </span>
-                            <span className='rounded bg-white px-1.5 py-0.5 text-gray-600'>
-                              {testInteraction.interactionRuns.length} run
-                              {testInteraction.interactionRuns.length === 1
-                                ? ''
-                                : 's'}
-                            </span>
-                          </div>
+          {resultTab === 'details' && (
+            <div ref={eventLogRef} className='flex-1 overflow-y-auto'>
+              {/* Navigation Section */}
+              <DetailsSection
+                title='Navigation'
+                count={navigationMap?.discoveredPages?.length ?? 0}
+              >
+                <div className='font-mono text-[10px]'>
+                  {(navigationMap?.discoveredPages ?? []).map(page => {
+                    const visit = navigationMap?.pageVisits.find(
+                      item => item.relativePath === page.relativePath
+                    );
+                    return (
+                      <div
+                        key={page.id}
+                        className='px-2 py-1 border-b border-gray-100 last:border-0'
+                      >
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='text-gray-700'>
+                            {page.relativePath}
+                          </span>
+                          <span className='text-blue-600'>
+                            {visit?.status ?? 'discovered'}
+                          </span>
                         </div>
-                        <span className='text-gray-500 whitespace-nowrap'>
-                          p{testInteraction.priority}
-                        </span>
-                      </div>
-                      <div className='text-gray-500'>
-                        start {testInteraction.startingPath || '/'}
-                        {testInteraction.dependencyTestInteractionId
-                          ? ` · depends on #${testInteraction.dependencyTestInteractionId}`
-                          : ''}
-                      </div>
-                      {testInteraction.interactionRuns.map(elementRun => (
-                        <div
-                          key={elementRun.id}
-                          className='mt-1 rounded border border-gray-200 bg-white px-2 py-1 text-gray-600'
-                        >
-                          {(() => {
-                            const errorFindings = elementRun.findings.filter(
-                              finding => finding.type === 'error'
-                            );
-                            return (
-                              <>
-                                run {elementRun.id} · {elementRun.status}
-                                {elementRun.durationMs != null
-                                  ? ` · ${elementRun.durationMs}ms`
-                                  : ''}
-                                {errorFindings.length > 0
-                                  ? ` · ${errorFindings.length} error${errorFindings.length === 1 ? '' : 's'}`
-                                  : ''}
-                              </>
-                            );
-                          })()}
+                        <div className='mt-0.5 text-gray-500 leading-4'>
+                          from {page.sourcePagePath || 'root'}
+                          {page.sourceLabel ? ` via ${page.sourceLabel}` : ''}
                         </div>
-                      ))}
+                      </div>
+                    );
+                  })}
+                  {(navigationMap?.discoveredPages.length ?? 0) === 0 && (
+                    <div className='p-3 text-center text-gray-400'>
+                      No navigation data yet
                     </div>
-                  ))}
+                  )}
                 </div>
-              ))}
-              {(runStructure?.surfaces.length ?? 0) === 0 && (
-                <div className='p-3 text-center text-gray-400'>
-                  No coverage tree yet
-                </div>
-              )}
-            </div>
-          )}
+              </DetailsSection>
 
-          {resultTab === 'events' && (
-            <div
-              ref={eventLogRef}
-              className='flex-1 overflow-y-auto font-mono text-[10px]'
-            >
-              {enrichedEventRows.map(
-                ({ key, event, testInteractionRunId, context }) => (
-                  <div
-                    key={key}
-                    className='px-2 py-0.5 border-b border-gray-100 last:border-0'
-                  >
-                    <span className='text-gray-400'>
-                      {new Date(event.timestamp).toLocaleTimeString()}
-                    </span>{' '}
-                    <span className='text-blue-600'>{event.type}</span>{' '}
-                    <span className='text-gray-600'>{event.message}</span>
-                    {context && (
-                      <div className='mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-gray-500'>
-                        <span className='rounded bg-slate-200 px-1.5 py-0.5 uppercase tracking-wide text-slate-700'>
-                          {context.testType}
-                        </span>
-                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                          {context.surfaceTitle}
-                        </span>
-                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                          element #{context.testInteractionId}
-                        </span>
-                        <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                          run #{testInteractionRunId}
-                        </span>
-                        {context.startingPath && (
-                          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                            {context.startingPath}
-                          </span>
+              {/* Coverage Section */}
+              <DetailsSection
+                title='Coverage'
+                count={runStructure?.surfaces?.length ?? 0}
+              >
+                <div className='font-mono text-[10px]'>
+                  {(runStructure?.surfaces ?? []).map(surface => {
+                    const statusText =
+                      surface.surfaceRuns.map(run => run.status).join(', ') ||
+                      'pending';
+                    return (
+                      <CollapsibleRow
+                        key={surface.id}
+                        label={surface.title}
+                        badge={`${surface.testInteractions.length} tests`}
+                        status={statusText}
+                      >
+                        {surface.testInteractions.map(ti => (
+                          <CollapsibleRow
+                            key={ti.id}
+                            label={ti.title}
+                            badge={ti.testType}
+                            status={
+                              ti.interactionRuns.length > 0
+                                ? ti.interactionRuns
+                                    .map(r => r.status)
+                                    .join(', ')
+                                : 'pending'
+                            }
+                            indent
+                          >
+                            {ti.interactionRuns.map(run => {
+                              const errCount = run.findings.filter(
+                                (f: any) => f.type === 'error'
+                              ).length;
+                              return (
+                                <div
+                                  key={run.id}
+                                  className='px-4 py-1 text-[10px] text-gray-600'
+                                >
+                                  run {run.id} &middot; {run.status}
+                                  {run.durationMs != null
+                                    ? ` \u00B7 ${run.durationMs}ms`
+                                    : ''}
+                                  {errCount > 0
+                                    ? ` \u00B7 ${errCount} error${errCount === 1 ? '' : 's'}`
+                                    : ''}
+                                </div>
+                              );
+                            })}
+                          </CollapsibleRow>
+                        ))}
+                      </CollapsibleRow>
+                    );
+                  })}
+                  {(runStructure?.surfaces.length ?? 0) === 0 && (
+                    <div className='p-3 text-center text-gray-400'>
+                      No coverage data yet
+                    </div>
+                  )}
+                </div>
+              </DetailsSection>
+
+              {/* Events Section */}
+              <DetailsSection title='Events' count={enrichedEventRows.length}>
+                <div className='font-mono text-[10px]'>
+                  {enrichedEventRows
+                    .slice(-20)
+                    .map(({ key, event, testInteractionRunId, context }) => (
+                      <CollapsibleEventRow
+                        key={key}
+                        event={event}
+                        context={context}
+                        testInteractionRunId={testInteractionRunId ?? undefined}
+                      />
+                    ))}
+                  {enrichedEventRows.length > 20 && (
+                    <details className='border-t border-gray-100'>
+                      <summary className='py-1.5 text-center text-[10px] text-blue-600 hover:text-blue-700 font-medium cursor-pointer'>
+                        Show all {enrichedEventRows.length} events
+                      </summary>
+                      {enrichedEventRows
+                        .slice(0, -20)
+                        .map(
+                          ({ key, event, testInteractionRunId, context }) => (
+                            <CollapsibleEventRow
+                              key={key}
+                              event={event}
+                              context={context}
+                              testInteractionRunId={
+                                testInteractionRunId ?? undefined
+                              }
+                            />
+                          )
                         )}
-                        {context.dependencyTestInteractionId != null && (
-                          <span className='rounded bg-gray-100 px-1.5 py-0.5'>
-                            depends on #{context.dependencyTestInteractionId}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {context && (
-                      <div className='mt-0.5 text-gray-700 break-words'>
-                        {context.title}
-                        {context.durationMs != null
-                          ? ` · ${context.durationMs}ms`
-                          : ''}
-                        {context.findingsCount > 0
-                          ? ` · ${context.findingsCount} finding${context.findingsCount === 1 ? '' : 's'}`
-                          : ''}
-                      </div>
-                    )}
-                  </div>
-                )
-              )}
+                    </details>
+                  )}
+                </div>
+              </DetailsSection>
             </div>
           )}
         </div>
@@ -2484,121 +2585,97 @@ export function SidePanel() {
           )}
         </div>
       )}
+
+      {/* Scenarios list after scan completes */}
+      {progress.isComplete && scenarios.length > 0 && (
+        <div className='space-y-1.5'>
+          <div className='text-[11px] font-medium text-gray-700'>
+            Scenarios ({scenarios.length})
+          </div>
+          <div className='space-y-1'>
+            {scenarios.map(s => (
+              <div
+                key={s.id}
+                className='rounded-md border border-gray-200 bg-white px-2.5 py-1.5 flex items-center justify-between'
+              >
+                <div className='min-w-0 flex-1'>
+                  <div className='text-[11px] font-medium text-gray-800 truncate'>
+                    {s.title}
+                  </div>
+                  <div className='text-[10px] text-gray-400 truncate'>
+                    {s.startingPath}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRunScenario(s)}
+                  disabled={isScanning || runningScenarioId != null}
+                  className='ml-2 shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-white bg-green-500 hover:bg-green-600 disabled:opacity-40 text-[10px]'
+                  title='Run scenario'
+                >
+                  {runningScenarioId === s.id ? '...' : '\u25B6'}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 
   // =========================================================================
   // Scenarios View
-  // =========================================================================
-
-  const scenariosView = (
-    <div className='flex flex-col h-full p-3 space-y-3'>
-      <div className='flex items-center justify-between'>
-        <button
-          onClick={() => setAppView('home')}
-          className='text-xs text-blue-600 hover:text-blue-700 font-medium'
-        >
-          &larr; Back
-        </button>
-        <span className='text-sm font-semibold text-gray-800'>Scenarios</span>
-        <div className='w-10' />
-      </div>
-
-      <button
-        onClick={() => setShowNewScenarioForm(v => !v)}
-        className='w-full text-left text-xs font-medium text-blue-600 hover:text-blue-700 px-2 py-1.5 rounded-md border border-dashed border-blue-300 hover:bg-blue-50'
-      >
-        {showNewScenarioForm ? '- Cancel' : '+ New Scenario'}
-      </button>
-
-      {showNewScenarioForm && (
-        <div className='space-y-1.5 rounded-md border border-gray-200 bg-gray-50 p-2'>
-          <input
-            type='text'
-            placeholder='Title (e.g., Checkout flow)'
-            value={newScenarioTitle}
-            onChange={e => setNewScenarioTitle(e.target.value)}
-            className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
-          />
-          <input
-            type='text'
-            placeholder='Starting path (e.g., /store)'
-            value={newScenarioPath}
-            onChange={e => setNewScenarioPath(e.target.value)}
-            className='w-full text-xs px-2 py-1 border border-gray-300 rounded'
-          />
-          <textarea
-            placeholder='Prompt (e.g., Add item to cart and complete checkout)'
-            value={newScenarioPrompt}
-            onChange={e => setNewScenarioPrompt(e.target.value)}
-            rows={3}
-            className='w-full text-xs px-2 py-1 border border-gray-300 rounded resize-none'
-          />
-          <button
-            onClick={handleCreateScenario}
-            disabled={creatingScenario || !newScenarioTitle.trim()}
-            className='w-full text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 px-3 py-1.5 rounded'
-          >
-            {creatingScenario ? 'Creating...' : 'Create'}
-          </button>
-        </div>
-      )}
-
-      {loadingScenarios && (
-        <div className='text-center text-xs text-gray-400 py-4'>
-          Loading scenarios...
-        </div>
-      )}
-
-      {!loadingScenarios && scenarios.length === 0 && !showNewScenarioForm && (
-        <div className='text-center text-xs text-gray-400 py-8'>
-          No scenarios yet
-        </div>
-      )}
-
-      <div className='flex-1 overflow-y-auto space-y-2'>
-        {scenarios.map(s => (
-          <div
-            key={s.id}
-            className='rounded-md border border-gray-200 bg-white px-2.5 py-2 flex items-center justify-between'
-          >
-            <div className='min-w-0 flex-1'>
-              <div className='text-xs font-medium text-gray-800 truncate'>
-                {s.title}
-              </div>
-              <div className='text-[10px] text-gray-400 truncate'>
-                {s.startingPath}
-                {s.prompt ? ` — ${s.prompt}` : ''}
-              </div>
-            </div>
-            <button
-              onClick={() => handleRunScenario(s)}
-              disabled={isScanning || runningScenarioId != null}
-              className='ml-2 shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white bg-green-500 hover:bg-green-600 disabled:opacity-40'
-              title='Run scenario'
-            >
-              {runningScenarioId === s.id ? (
-                <span className='text-[10px]'>...</span>
-              ) : (
-                <span className='text-sm'>&#9654;</span>
-              )}
-            </button>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-
   return (
-    <div className='relative min-h-screen pb-11'>
-      {appView === 'scenarios' ? scenariosView : homeView}
+    <div className='relative min-h-screen pb-8'>
+      {appView === 'scenario-detail' && selectedScenario ? (
+        <div className='p-3 space-y-3 text-sm flex flex-col h-screen'>
+          <ScenarioDetailView
+            scenario={selectedScenario}
+            token={token ?? ''}
+            apiUrl={API_URL}
+            testEnvironmentId={runSummary?.testEnvironmentId ?? null}
+            scenarioProgress={scenarioProgress}
+            onBack={() => {
+              setAppView('scenarios');
+              setSelectedScenario(null);
+              setScenarioProgress(null);
+            }}
+            onRun={handleRunScenario}
+            onStop={() => {
+              chrome.runtime.sendMessage({ type: 'STOP_SCAN' });
+              setRunningScenarioId(null);
+              setScenarioProgress(null);
+            }}
+          />
+        </div>
+      ) : appView === 'scenarios' ? (
+        <div className='p-3 space-y-3 text-sm flex flex-col h-screen'>
+          <ScenariosListView
+            scenarios={scenarios}
+            loading={loadingScenarios}
+            token={token ?? ''}
+            apiUrl={API_URL}
+            runnerId={runSummary?.runnerId ?? 0}
+            productId={Number(selectedProductId) || 0}
+            testEnvironmentId={runSummary?.testEnvironmentId ?? null}
+            onRefresh={fetchScenarios}
+            onSelectScenario={s => {
+              setSelectedScenario(s);
+              setAppView('scenario-detail');
+            }}
+            onRunScenario={handleRunScenario}
+            onNewScan={() => setAppView('home')}
+          />
+        </div>
+      ) : (
+        homeView
+      )}
       {(isScanning || activeStatusUpdate) && (
-        <div className='fixed inset-x-0 bottom-0 z-50 border-t border-gray-200 bg-white/95 px-3 py-2 text-xs text-gray-700 shadow-sm backdrop-blur'>
-          <div className='flex items-center gap-2'>
+        <div className='fixed inset-x-0 bottom-0 z-50 border-t border-gray-200 bg-white/95 px-3 py-1 text-[10px] text-gray-600 backdrop-blur'>
+          <div className='flex items-center gap-1.5'>
             <span
-              className={`h-2 w-2 rounded-full ${
+              className={`h-1.5 w-1.5 rounded-full shrink-0 ${
                 isScanning && !progress.isPaused
-                  ? 'bg-blue-500 animate-pulse'
+                  ? 'bg-blue-500'
                   : progress.phase === 'failed'
                     ? 'bg-red-500'
                     : progress.phase === 'completed'
