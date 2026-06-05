@@ -632,12 +632,16 @@ export function SidePanel() {
     string | null
   >(null);
   const eventLogRef = useRef<HTMLDivElement>(null);
+  const environmentCacheRef = useRef<Map<number, ProductEnvironmentOption[]>>(
+    new Map()
+  );
+  const cachedProductIdsRef = useRef<string>('');
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
   const [appView, setAppView] = useState<AppView>('home');
   const [showSettings, setShowSettings] = usePersistedState<boolean>(
     'showSettings',
-    true,
+    false,
     chromeStorageAdapter
   );
   const [configExpanded, setConfigExpanded] = usePersistedState<boolean>(
@@ -807,6 +811,18 @@ export function SidePanel() {
       .finally(() => setLoadingProducts(false));
   }, [selectedEntityId, token, entities]);
 
+  // Invalidate environment cache when the product set changes
+  useEffect(() => {
+    const productIdKey = products
+      .map(p => p.id)
+      .sort((a, b) => Number(a) - Number(b))
+      .join(',');
+    if (productIdKey !== cachedProductIdsRef.current) {
+      environmentCacheRef.current.clear();
+      cachedProductIdsRef.current = productIdKey;
+    }
+  }, [products]);
+
   useEffect(() => {
     if (!token || !activeTabUrl || products.length === 0) {
       if (products.length === 0) {
@@ -829,30 +845,47 @@ export function SidePanel() {
         return;
       }
 
-      const environmentResponses = await Promise.all(
-        products.map(async product => {
-          try {
-            const response = await fetch(
-              `${API_URL}/api/v1/products/${product.id}/environments`,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-              }
-            );
-            const data = await response.json();
-            const environments =
-              data.success && Array.isArray(data.data)
-                ? (data.data as ProductEnvironmentOption[])
-                : [];
-            return { product, environments };
-          } catch (err) {
-            logPanel('fetch-environments:failed', {
-              productId: product.id,
-              error: err instanceof Error ? err.message : String(err),
-            });
-            return { product, environments: [] as ProductEnvironmentOption[] };
-          }
-        })
-      );
+      const cache = environmentCacheRef.current;
+      const uncachedProducts = products.filter(p => !cache.has(Number(p.id)));
+
+      if (uncachedProducts.length > 0) {
+        const freshResults = await Promise.all(
+          uncachedProducts.map(async product => {
+            try {
+              const response = await fetch(
+                `${API_URL}/api/v1/products/${product.id}/environments`,
+                {
+                  headers: { Authorization: `Bearer ${token}` },
+                }
+              );
+              const data = await response.json();
+              const environments =
+                data.success && Array.isArray(data.data)
+                  ? (data.data as ProductEnvironmentOption[])
+                  : [];
+              return { product, environments };
+            } catch (err) {
+              logPanel('fetch-environments:failed', {
+                productId: product.id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+              return {
+                product,
+                environments: [] as ProductEnvironmentOption[],
+              };
+            }
+          })
+        );
+
+        for (const { product, environments } of freshResults) {
+          cache.set(Number(product.id), environments);
+        }
+      }
+
+      const environmentResponses = products.map(product => ({
+        product,
+        environments: cache.get(Number(product.id)) ?? [],
+      }));
 
       if (cancelled) {
         return;
@@ -981,7 +1014,6 @@ export function SidePanel() {
 
   // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
-    setConfigExpanded(false);
     console.log('[SidePanel] handleTestCurrentPage called', {
       activeTabUrl,
       hasToken: !!token,
@@ -1203,7 +1235,6 @@ export function SidePanel() {
     selectedCredentialId,
     loginUrl,
     scanMode,
-    setConfigExpanded,
   ]);
 
   // Auto-scroll event log
@@ -1453,25 +1484,6 @@ export function SidePanel() {
       void fetchScenarios();
     }
   }, [progress.isComplete, runSummary?.runnerId, fetchScenarios]);
-
-  // Auto-detect: switch to scenarios view when runner exists and not scanning
-  useEffect(() => {
-    if (
-      runSummary?.runnerId &&
-      !isScanning &&
-      !progress.isComplete &&
-      appView === 'home'
-    ) {
-      setAppView('scenarios');
-      void fetchScenarios();
-    }
-  }, [
-    runSummary?.runnerId,
-    isScanning,
-    progress.isComplete,
-    appView,
-    fetchScenarios,
-  ]);
 
   const handleRunScenario = useCallback(
     async (scenario: ScenarioItem) => {
@@ -1816,10 +1828,8 @@ export function SidePanel() {
             onExpand={() => setConfigExpanded(true)}
           />
         )}
-      {!isScanning && (
-        <AnimatedCollapse
-          open={!(selectedEntityId && selectedProductId) || configExpanded}
-        >
+      {!isScanning &&
+        (!(selectedEntityId && selectedProductId) || configExpanded) && (
           <div className='space-y-2'>
             {!!(selectedEntityId && selectedProductId) && (
               <button
@@ -2173,8 +2183,7 @@ export function SidePanel() {
               </>
             )}
           </div>
-        </AnimatedCollapse>
-      )}
+        )}
 
       {/* Test Current Page Button + Scenarios */}
       {activeTabUrl && !isScanning && (
@@ -2193,6 +2202,17 @@ export function SidePanel() {
               ? 'Submitting...'
               : `Test ${new URL(activeTabUrl).hostname}`}
           </button>
+          {runSummary?.runnerId && (
+            <button
+              onClick={() => {
+                setAppView('scenarios');
+                void fetchScenarios();
+              }}
+              className='w-full py-1.5 px-3 text-xs font-medium rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50'
+            >
+              Scenarios
+            </button>
+          )}
         </div>
       )}
 

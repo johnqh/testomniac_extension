@@ -477,6 +477,9 @@ function addEvent(type: string, message: string, findingTitle?: string) {
 const SCAN_STATE_FLUSH_INTERVAL = 10; // persist every Nth progress update
 let scanStateSinceFlush = 0;
 
+let progressThrottleTimer: ReturnType<typeof setTimeout> | null = null;
+let progressPending = false;
+
 function sendProgressToSidePanel(forcePersist = false) {
   if (forcePersist) {
     scanStateSinceFlush = 0;
@@ -485,8 +488,31 @@ function sendProgressToSidePanel(forcePersist = false) {
     scanStateSinceFlush = 0;
     void persistScanState();
   }
-  // Send progress without the large base64 screenshot to keep messages small.
-  // Screenshots are sent via the dedicated SCREENSHOT_CAPTURED message.
+
+  // Throttle progress messages to max 1 per second to avoid side panel flicker
+  if (forcePersist) {
+    // Force: send immediately and reset throttle
+    if (progressThrottleTimer) {
+      clearTimeout(progressThrottleTimer);
+      progressThrottleTimer = null;
+    }
+    progressPending = false;
+    doSendProgress();
+  } else if (!progressThrottleTimer) {
+    doSendProgress();
+    progressThrottleTimer = setTimeout(() => {
+      progressThrottleTimer = null;
+      if (progressPending) {
+        progressPending = false;
+        doSendProgress();
+      }
+    }, 1000);
+  } else {
+    progressPending = true;
+  }
+}
+
+function doSendProgress() {
   chrome.runtime
     .sendMessage({
       type: 'SCAN_PROGRESS',

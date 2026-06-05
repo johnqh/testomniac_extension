@@ -1048,8 +1048,21 @@ export class ChromeAdapter implements BrowserAdapter {
     try {
       return await action();
     } finally {
-      await this.hideInteractionMarker();
+      // Don't hide between rapid interactions — the next showInteractionMarker
+      // will move the marker smoothly. Only hide after the last interaction
+      // in a batch (handled by a delayed cleanup).
+      this.scheduleMarkerHide();
     }
+  }
+
+  private markerHideTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private scheduleMarkerHide(): void {
+    if (this.markerHideTimer) clearTimeout(this.markerHideTimer);
+    this.markerHideTimer = setTimeout(() => {
+      this.markerHideTimer = null;
+      void this.hideInteractionMarker();
+    }, 500);
   }
 
   private async withActiveElementMarker<T>(
@@ -1100,6 +1113,11 @@ export class ChromeAdapter implements BrowserAdapter {
     selector: string,
     mode: 'hover' | 'click' | 'input' | 'keyboard' | 'select'
   ): Promise<void> {
+    // Cancel any pending hide — we're showing a new marker
+    if (this.markerHideTimer) {
+      clearTimeout(this.markerHideTimer);
+      this.markerHideTimer = null;
+    }
     this.markerVisible = true;
     try {
       await chrome.scripting.executeScript({
@@ -1174,8 +1192,8 @@ export class ChromeAdapter implements BrowserAdapter {
         func: () => {
           const marker = document.getElementById('__tmnc-interaction-marker');
           if (!marker) return;
+          // Just fade out — don't remove. Next showInteractionMarker reuses it.
           marker.style.opacity = '0';
-          window.setTimeout(() => marker.remove(), 180);
         },
       });
     } catch (err) {
