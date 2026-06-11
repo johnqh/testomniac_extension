@@ -128,7 +128,7 @@ export function ScenariosListView({
     setDetecting(true);
     setError(null);
     try {
-      const res = await fetch(`${apiUrl}/api/v1/combined/end`, {
+      const res = await fetch(`${apiUrl}/api/v1/scan/end`, {
         method: 'POST',
         headers,
         body: JSON.stringify({ productId }),
