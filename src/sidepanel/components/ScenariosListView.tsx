@@ -129,7 +129,7 @@ export function ScenariosListView({
     setError(null);
     try {
       const res = await fetch(
-        `${apiUrl}/api/v1/combined/detect-personas-and-scenarios`,
+        `${apiUrl}/api/v1/combined/end`,
         {
           method: 'POST',
           headers,
