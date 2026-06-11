@@ -109,19 +109,22 @@ src/
 These come from `@sudobility/testomniac_runner_service`:
 
 - `runTestRun()`
-- `PageAnalyzer`
+- `PageAnalyzer` (stripped down — finding dedup, expectation generation, hover-to-click only)
 - expertise evaluation
 - actionable-item extraction
 - scaffold and pattern detection
-- target-page-state creation
-- discovery-time test-case generation
+
+Test interaction generators and page state persistence now run server-side in
+`testomniac_api`. The runner_service calls `/scan/next` which handles all of
+this in a single request per interaction.
 
 ## Important Architecture Notes
 
 - The extension uses `runTestRun()`, not the removed legacy `runScan()` path.
-- Discovery-time follow-up coverage is created by `PageAnalyzer`.
+- The runner_service now calls `/scan/next` instead of making 5-6 sequential API calls per interaction.
 - Hover is the primary interaction primitive for actionable items. Additional
-  click or nested-hover cases are generated after the hover result is analyzed.
+  click or nested-hover cases are generated server-side after the hover result is analyzed.
+- The extension UI calls `/scan/end` for persona/scenario detection (replaces the old `/combined/detect-personas-and-scenarios` endpoint).
 - The side panel is a side panel, not a popup.
 - Service worker has keepalive timer to prevent Chrome from terminating it mid-scan.
 
