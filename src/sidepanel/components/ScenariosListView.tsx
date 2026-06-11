@@ -128,14 +128,11 @@ export function ScenariosListView({
     setDetecting(true);
     setError(null);
     try {
-      const res = await fetch(
-        `${apiUrl}/api/v1/combined/end`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ productId }),
-        }
-      );
+      const res = await fetch(`${apiUrl}/api/v1/combined/end`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ productId }),
+      });
       const json = await res.json();
       if (!json.success) {
         setError(json.error ?? 'Detection failed');
