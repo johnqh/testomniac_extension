@@ -40,11 +40,7 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, './src'),
         '@background': path.resolve(__dirname, './src/background'),
-        '@sudobility/testomniac_runner_service': path.resolve(
-          __dirname,
-          '../testomniac_runner_service/src/index.ts'
-        ),
-        // Shim node:crypto for browser — scanning_service uses it for hashing
+        // Shim node:crypto for browser — runner_service uses it for hashing
         'node:crypto': path.resolve(__dirname, './src/shims/crypto.ts'),
         // Stub out optional dependencies not needed in the extension
         '@sudobility/devops-components': path.resolve(

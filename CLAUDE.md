@@ -184,8 +184,8 @@ bun run format:check   # Check formatting
 
 ## Gotchas
 
-- `@sudobility/testomniac_runner_service` is aliased to sibling directory source in vite.config.ts (not from node_modules)
-- Vite caches pre-bundled deps in `node_modules/.vite` — after changing runner_service source, run `rm -rf node_modules/.vite` and restart dev server
+- All `@sudobility/*` dependencies (including `testomniac_runner_service`) resolve from published npm packages — no sibling-source aliases, `file:` references, or symlinks. To pick up runner_service changes, publish a new version (via `push_all.sh`) and `bun install`. Do not re-add a local source alias in vite.config.ts.
+- Vite caches pre-bundled deps in `node_modules/.vite` — if a dependency upgrade isn't reflected, run `rm -rf node_modules/.vite` and restart the dev server
 - Chrome service workers can also cache stale JS — toggle extension off/on in chrome://extensions if code changes aren't reflected
 - postgres.js returns BIGSERIAL/int8 columns as strings (not numbers). When using raw SQL instead of Drizzle, always `Number()` ID fields in the response mapping
 - CHAR(N) columns are space-padded in PostgreSQL — use `.trim()` when comparing cached DB values against unpadded input
