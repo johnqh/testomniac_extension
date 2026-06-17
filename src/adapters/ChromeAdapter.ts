@@ -1,4 +1,8 @@
 import type { BrowserAdapter } from '@sudobility/testomniac_runner_service';
+import {
+  NetworkIdleTracker,
+  waitForNetworkIdle,
+} from '@sudobility/testomniac_runner_service';
 
 const REPLAY_SELECTOR_PREFIX = 'tmnc-replay:';
 
@@ -18,7 +22,11 @@ export class ChromeAdapter implements BrowserAdapter {
   private debuggerEventsBound: boolean = false;
   private consoleHandlers = new Set<(...args: unknown[]) => void>();
   private responseHandlers = new Set<(...args: unknown[]) => void>();
-  private requestMetadata = new Map<string, { method: string; url: string }>();
+  private requestMetadata = new Map<
+    string,
+    { method: string; url: string; type: string; startTs: number }
+  >();
+  private readonly idleTracker = new NetworkIdleTracker();
   private static readonly MAX_CONSOLE_BUFFER = 1000;
   private static readonly MAX_NETWORK_BUFFER = 1000;
   private static readonly MAX_REQUEST_METADATA = 500;
@@ -556,6 +564,16 @@ export class ChromeAdapter implements BrowserAdapter {
     await this.waitForTabLoad(options?.timeout || 5000);
   }
 
+  async waitForNetworkIdle(opts?: {
+    idleMs?: number;
+    floorMs?: number;
+    staleMs?: number;
+    timeout?: number;
+    pollMs?: number;
+  }): Promise<void> {
+    await waitForNetworkIdle(this.idleTracker, opts);
+  }
+
   async evaluate<T>(
     fn: string | ((...args: unknown[]) => T),
     ...args: unknown[]
@@ -768,6 +786,7 @@ export class ChromeAdapter implements BrowserAdapter {
     this.consoleLogBuffer.length = 0;
     this.networkLogBuffer.length = 0;
     this.requestMetadata.clear();
+    this.idleTracker.clear();
 
     // Set up debugger on the new tab
     await this.ensureDebugger();
@@ -794,6 +813,7 @@ export class ChromeAdapter implements BrowserAdapter {
       this.debuggerAttached = false;
     }
     this.requestMetadata.clear();
+    this.idleTracker.clear();
     this.consoleLogBuffer.length = 0;
     this.networkLogBuffer.length = 0;
     try {
@@ -974,6 +994,7 @@ export class ChromeAdapter implements BrowserAdapter {
       if (method === 'Network.requestWillBeSent') {
         const payload = params as {
           requestId?: string;
+          type?: string;
           request?: {
             method?: string;
             url?: string;
@@ -985,10 +1006,14 @@ export class ChromeAdapter implements BrowserAdapter {
             const firstKey = this.requestMetadata.keys().next().value;
             if (firstKey) this.requestMetadata.delete(firstKey);
           }
+          const resourceType = payload.type || 'Other';
           this.requestMetadata.set(payload.requestId, {
             method: payload.request.method || 'GET',
             url: payload.request.url || '',
+            type: resourceType,
+            startTs: Date.now(),
           });
+          this.idleTracker.start(payload.requestId, resourceType);
         }
         return;
       }
@@ -1033,6 +1058,7 @@ export class ChromeAdapter implements BrowserAdapter {
         const payload = params as { requestId?: string };
         if (payload.requestId) {
           this.requestMetadata.delete(payload.requestId);
+          this.idleTracker.end(payload.requestId);
         }
       }
     };
