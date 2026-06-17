@@ -10,7 +10,6 @@ import { ChromeAdapter } from '../adapters/ChromeAdapter';
 import {
   ApiClient,
   runTestRun,
-  setClickWaitMs,
   type ScanEventHandler,
   type Expertise,
   TesterExpertise,
@@ -543,7 +542,6 @@ async function loadConfig() {
   if (stored.apiUrl) apiUrl = stored.apiUrl as string;
   if (stored.apiKey) apiKey = stored.apiKey as string;
   if (stored.clickWaitMs != null) clickWaitMs = Number(stored.clickWaitMs);
-  setClickWaitMs(clickWaitMs);
   LOG(
     `Config loaded: apiUrl=${apiUrl}, hasApiKey=${!!apiKey}, clickWaitMs=${clickWaitMs}`
   );
@@ -698,8 +696,7 @@ async function runScanSession(
     } else {
       LOG('Already on target URL');
     }
-    LOG('Waiting 1s for page to settle...');
-    await new Promise(r => setTimeout(r, 1000));
+    LOG('Navigation complete — network-idle gate will settle reads');
 
     const eventHandler: ScanEventHandler & {
       onStatusUpdate?: (update: {
@@ -1365,7 +1362,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     apiUrl = message.apiUrl || apiUrl;
     apiKey = message.apiKey || apiKey;
     clickWaitMs = newClickWaitMs;
-    setClickWaitMs(clickWaitMs);
     sendResponse({ ok: true });
   }
   return true;
