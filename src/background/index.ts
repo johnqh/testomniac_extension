@@ -819,61 +819,13 @@ async function runScanSession(
       },
     };
 
-    // Fetch credential secrets if entityCredentialId is provided
-    let credentialData:
-      | {
-          email?: string;
-          username?: string;
-          password: string;
-          twoFactorCode?: string;
-        }
-      | undefined;
-    const credentialId =
-      loginOptions?.entityCredentialId ??
-      (run as { entityCredentialId?: number | null }).entityCredentialId ??
-      undefined;
+    // Credentials now live in the per-environment userData blob, which
+    // runner_service fetches itself by testEnvironmentId. The background only
+    // resolves the login URL here.
     const resolvedLoginUrl =
       loginOptions?.loginUrl ??
       (run as { loginUrl?: string | null }).loginUrl ??
       undefined;
-
-    if (credentialId) {
-      LOG(`Fetching credential ${credentialId} from API...`);
-      try {
-        const credRes = await fetch(
-          `${apiUrl}/api/v1/entity-credentials/${credentialId}`,
-          {
-            headers: apiKey
-              ? { 'x-api-key': apiKey }
-              : ({} as Record<string, string>),
-          }
-        );
-        const credJson = await credRes.json();
-        if (credJson.success && credJson.data) {
-          const cred = credJson.data as {
-            email?: string;
-            username?: string;
-            password?: string;
-            twoFactorCode?: string;
-          };
-          if (cred.password) {
-            credentialData = {
-              email: cred.email ?? undefined,
-              username: cred.username ?? undefined,
-              password: cred.password,
-              twoFactorCode: cred.twoFactorCode ?? undefined,
-            };
-            LOG(`Credential ${credentialId} fetched successfully`);
-          } else {
-            LOG(`Credential ${credentialId} has no password, skipping`);
-          }
-        } else {
-          ERR(`Failed to fetch credential ${credentialId}:`, credJson);
-        }
-      } catch (err) {
-        ERR(`Error fetching credential ${credentialId}:`, err);
-      }
-    }
 
     const runExpertiseSlugs =
       (run as { expertiseSlugsJson?: string[] | null }).expertiseSlugsJson ??
@@ -908,8 +860,6 @@ async function runScanSession(
           sendProgressToSidePanel(true);
         },
         loginUrl: resolvedLoginUrl,
-        entityCredentialId: credentialId,
-        credentials: credentialData,
         scanMode,
         scanScopePath,
       },
