@@ -415,30 +415,6 @@ interface ProductEnvironmentOption {
   updatedAt: string | null;
 }
 
-interface EntityCredentialOption {
-  id: number;
-  entityId: string;
-  label: string;
-  authProvider: string;
-  loginUrl: string | null;
-  email: string | null;
-  username: string | null;
-  hasPassword: boolean;
-  hasTwoFactorCode: boolean;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
-const AUTH_PROVIDER_OPTIONS = [
-  { value: 'email_password', label: 'Email / Password' },
-  { value: 'google', label: 'Google' },
-  { value: 'apple', label: 'Apple' },
-  { value: 'microsoft', label: 'Microsoft' },
-  { value: 'github', label: 'GitHub' },
-  { value: 'okta', label: 'Okta' },
-  { value: 'saml', label: 'SAML' },
-];
-
 const initialProgress: ScanProgress = {
   scanId: null,
   phase: 'idle',
@@ -717,17 +693,16 @@ export function SidePanel() {
     chromeStorageAdapter,
     isScanMode
   );
-  const [credentials, setCredentials] = useState<EntityCredentialOption[]>([]);
-  const [loadingCredentials, setLoadingCredentials] = useState(false);
-  const [selectedCredentialId, setSelectedCredentialId] = useState<string>('');
   const [loginUrl, setLoginUrl] = useState('');
-  const [showNewCredentialForm, setShowNewCredentialForm] = useState(false);
-  const [newCredLabel, setNewCredLabel] = useState('');
-  const [newCredEmail, setNewCredEmail] = useState('');
-  const [newCredPassword, setNewCredPassword] = useState('');
-  const [newCredAuthProvider, setNewCredAuthProvider] =
-    useState('email_password');
-  const [savingCredential, setSavingCredential] = useState(false);
+  // Per-environment userData editor state. The blob is resolved + loaded
+  // on-demand when the section is expanded (userData is environment-scoped).
+  const [userDataEnvId, setUserDataEnvId] = useState<number | null>(null);
+  const [userDataJson, setUserDataJson] = useState('{}');
+  const [credEmail, setCredEmail] = useState('');
+  const [credPassword, setCredPassword] = useState('');
+  const [userDataLoading, setUserDataLoading] = useState(false);
+  const [userDataSaving, setUserDataSaving] = useState(false);
+  const [userDataError, setUserDataError] = useState<string | null>(null);
 
   const mergeProgress = useCallback(
     (prev: ScanProgress, next: ScanProgress): ScanProgress => {
@@ -924,38 +899,6 @@ export function SidePanel() {
     };
   }, [activeTabUrl, products, token]);
 
-  // Fetch entity credentials when "Continue with login" is enabled
-  const selectedEntity = entities.find(e => e.id === selectedEntityId);
-  const fetchCredentials = useCallback(async () => {
-    if (!selectedEntity || !token) {
-      setCredentials([]);
-      return;
-    }
-    setLoadingCredentials(true);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/v1/entities/${selectedEntity.entitySlug}/credentials`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
-        setCredentials(data.data);
-      }
-    } catch (err) {
-      logPanel('fetch-credentials:failed', {
-        entitySlug: selectedEntity?.entitySlug,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setLoadingCredentials(false);
-    }
-  }, [selectedEntity, token]);
-
-  useEffect(() => {
-    if (!continueWithLogin) return;
-    void fetchCredentials();
-  }, [continueWithLogin, fetchCredentials]);
-
   // Get active tab URL
   useEffect(() => {
     async function getActiveTab() {
@@ -1011,6 +954,130 @@ export function SidePanel() {
   const isEnvironmentSelectionValid = isLocalEnvironment
     ? true
     : resolvedEnvironmentLabel.length > 0;
+
+  // Resolve the current URL's environment, then load its userData blob.
+  // userData is environment-scoped, so we resolve on-demand when the user
+  // opens the editor (the side panel otherwise only resolves at scan time).
+  const loadUserData = useCallback(async () => {
+    if (!activeTabUrl || !token || !selectedProductId) {
+      setUserDataError('Select a product first');
+      return;
+    }
+    setUserDataLoading(true);
+    setUserDataError(null);
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      };
+      const baseUrl = new URL(activeTabUrl).origin;
+      const envRes = await fetch(
+        `${API_URL}/api/v1/test-environments/resolve`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            productId: Number(selectedProductId),
+            url: activeTabUrl,
+            baseUrl,
+            source: 'extension',
+            environmentLabel: isLocalEnvironment
+              ? undefined
+              : resolvedEnvironmentLabel,
+          }),
+        }
+      );
+      const envData = await envRes.json();
+      const envId = envData?.data?.testEnvironmentId;
+      if (!envData?.success || !envId) {
+        setUserDataError(
+          normalizeApiError(envData, 'Failed to resolve environment')
+        );
+        return;
+      }
+      setUserDataEnvId(envId);
+      const udRes = await fetch(
+        `${API_URL}/api/v1/test-environments/${envId}/user-data`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      const udJson = await udRes.json();
+      const data = (udJson?.success ? udJson.data?.data : {}) ?? {};
+      setUserDataJson(JSON.stringify(data, null, 2));
+      setCredEmail(data.credential?.email ?? '');
+      setCredPassword(data.credential?.password ?? '');
+      if (data.credential?.loginUrl && !loginUrl) {
+        setLoginUrl(String(data.credential.loginUrl));
+      }
+    } catch (err) {
+      logPanel('load-user-data:failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      setUserDataError('Failed to load environment data');
+    } finally {
+      setUserDataLoading(false);
+    }
+  }, [
+    activeTabUrl,
+    token,
+    selectedProductId,
+    isLocalEnvironment,
+    resolvedEnvironmentLabel,
+    loginUrl,
+  ]);
+
+  const saveUserData = useCallback(async () => {
+    if (!userDataEnvId || !token) return;
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(userDataJson || '{}');
+    } catch {
+      setUserDataError('Invalid JSON');
+      return;
+    }
+    // The credential sub-form is the source of truth for data.credential.
+    if (credEmail || credPassword) {
+      data.credential = {
+        ...(data.credential as Record<string, unknown> | undefined),
+        email: credEmail || undefined,
+        password: credPassword || undefined,
+      };
+    }
+    setUserDataSaving(true);
+    setUserDataError(null);
+    try {
+      const res = await fetch(
+        `${API_URL}/api/v1/test-environments/${userDataEnvId}/user-data`,
+        {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ data }),
+        }
+      );
+      const json = await res.json();
+      if (json?.success) {
+        setUserDataJson(JSON.stringify(json.data.data, null, 2));
+      } else {
+        setUserDataError(normalizeApiError(json, 'Failed to save user data'));
+      }
+    } catch (err) {
+      logPanel('save-user-data:failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      setUserDataError('Failed to save user data');
+    } finally {
+      setUserDataSaving(false);
+    }
+  }, [userDataEnvId, token, userDataJson, credEmail, credPassword]);
+
+  // Load userData when the login/userData section is expanded.
+  useEffect(() => {
+    if (continueWithLogin && userDataEnvId == null && !userDataLoading) {
+      void loadUserData();
+    }
+  }, [continueWithLogin, userDataEnvId, userDataLoading, loadUserData]);
 
   // Submit: create/select product → create/reuse runner → create scan → start
   const handleTestCurrentPage = useCallback(async () => {
@@ -1151,9 +1218,6 @@ export function SidePanel() {
       };
       if (continueWithLogin) {
         scanBody.continueWithLogin = true;
-        if (selectedCredentialId && selectedCredentialId !== '__new__') {
-          scanBody.entityCredentialId = Number(selectedCredentialId);
-        }
         if (loginUrl.trim()) {
           scanBody.loginUrl = loginUrl.trim();
         }
@@ -1197,12 +1261,6 @@ export function SidePanel() {
           environmentHostname: activeHostname,
           scanMode: scanMode !== 'full' ? scanMode : undefined,
           continueWithLogin,
-          entityCredentialId:
-            continueWithLogin &&
-            selectedCredentialId &&
-            selectedCredentialId !== '__new__'
-              ? Number(selectedCredentialId)
-              : undefined,
           loginUrl:
             continueWithLogin && loginUrl.trim() ? loginUrl.trim() : undefined,
         });
@@ -1232,7 +1290,6 @@ export function SidePanel() {
     isEnvironmentSelectionValid,
     user?.uid,
     continueWithLogin,
-    selectedCredentialId,
     loginUrl,
     scanMode,
   ]);
@@ -1990,7 +2047,7 @@ export function SidePanel() {
                   </p>
                 </div>
 
-                {/* Continue with login */}
+                {/* Continue with login (per-environment userData editor) */}
                 <div>
                   <label className='flex items-center gap-2 text-[11px] font-medium text-gray-700 cursor-pointer'>
                     <input
@@ -1999,9 +2056,9 @@ export function SidePanel() {
                       onChange={e => {
                         setContinueWithLogin(e.target.checked);
                         if (!e.target.checked) {
-                          setSelectedCredentialId('');
                           setLoginUrl('');
-                          setShowNewCredentialForm(false);
+                          setUserDataEnvId(null);
+                          setUserDataError(null);
                         }
                       }}
                     />
@@ -2011,65 +2068,20 @@ export function SidePanel() {
 
                 {continueWithLogin && (
                   <div className='rounded-md border border-gray-200 bg-gray-50 px-3 py-2 space-y-2'>
-                    <div>
-                      <label className='block text-[11px] font-medium text-gray-500 mb-0.5'>
-                        Credential
-                      </label>
-                      <Combobox
-                        options={[
-                          ...credentials.map(c => ({
-                            value: String(c.id),
-                            label: `${c.label} (${c.email || c.username || c.authProvider})`,
-                          })),
-                          { value: '__new__', label: '+ Add new' },
-                        ]}
-                        value={selectedCredentialId}
-                        onChange={value => {
-                          setSelectedCredentialId(value);
-                          setShowNewCredentialForm(value === '__new__');
-                          // Pre-fill loginUrl from selected credential
-                          if (value !== '__new__') {
-                            const cred = credentials.find(
-                              c => String(c.id) === value
-                            );
-                            if (cred?.loginUrl && !loginUrl) {
-                              setLoginUrl(cred.loginUrl);
-                            }
-                          }
-                        }}
-                        placeholder={
-                          loadingCredentials
-                            ? 'Loading...'
-                            : 'Select credential...'
-                        }
-                        disabled={loadingCredentials}
-                        emptyMessage='No credentials — add a new one'
-                        className='w-full'
-                      />
-                    </div>
-
-                    {showNewCredentialForm && (
-                      <div className='space-y-1.5 border-t border-gray-200 pt-2'>
-                        <div>
-                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                            Label
-                          </label>
-                          <input
-                            type='text'
-                            value={newCredLabel}
-                            onChange={e => setNewCredLabel(e.target.value)}
-                            placeholder='e.g. Admin account'
-                            className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                          />
-                        </div>
+                    {userDataLoading ? (
+                      <p className='text-[11px] text-gray-500'>
+                        Loading environment data…
+                      </p>
+                    ) : (
+                      <>
                         <div>
                           <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
                             Email
                           </label>
                           <input
                             type='email'
-                            value={newCredEmail}
-                            onChange={e => setNewCredEmail(e.target.value)}
+                            value={credEmail}
+                            onChange={e => setCredEmail(e.target.value)}
                             placeholder='user@example.com'
                             className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
                           />
@@ -2080,104 +2092,56 @@ export function SidePanel() {
                           </label>
                           <input
                             type='password'
-                            value={newCredPassword}
-                            onChange={e => setNewCredPassword(e.target.value)}
+                            value={credPassword}
+                            onChange={e => setCredPassword(e.target.value)}
                             placeholder='Password'
                             className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
                           />
                         </div>
                         <div>
                           <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                            Auth Provider
+                            Environment data (JSON)
                           </label>
-                          <Combobox
-                            options={AUTH_PROVIDER_OPTIONS}
-                            value={newCredAuthProvider}
-                            onChange={value => setNewCredAuthProvider(value)}
-                            placeholder='Select provider'
-                            emptyMessage='No providers'
-                            className='w-full'
+                          <textarea
+                            value={userDataJson}
+                            onChange={e => setUserDataJson(e.target.value)}
+                            rows={6}
+                            spellCheck={false}
+                            placeholder='{ "credential": { "email": "...", "password": "..." } }'
+                            className='w-full border border-gray-300 rounded px-2 py-1 text-[11px] font-mono'
+                          />
+                          <p className='text-[10px] text-gray-400 mt-0.5'>
+                            Use {'{credential.email}'} variables in interaction
+                            steps. The email/password above are merged into
+                            data.credential on save.
+                          </p>
+                        </div>
+                        <div>
+                          <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
+                            Login URL (optional)
+                          </label>
+                          <input
+                            type='text'
+                            value={loginUrl}
+                            onChange={e => setLoginUrl(e.target.value)}
+                            placeholder='https://example.com/login'
+                            className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
                           />
                         </div>
+                        {userDataError && (
+                          <p className='text-[11px] text-red-600'>
+                            {userDataError}
+                          </p>
+                        )}
                         <button
-                          onClick={async () => {
-                            if (
-                              !newCredLabel.trim() ||
-                              !selectedEntity ||
-                              !token
-                            )
-                              return;
-                            setSavingCredential(true);
-                            try {
-                              const res = await fetch(
-                                `${API_URL}/api/v1/entities/${selectedEntity.entitySlug}/credentials`,
-                                {
-                                  method: 'POST',
-                                  headers: {
-                                    'Content-Type': 'application/json',
-                                    Authorization: `Bearer ${token}`,
-                                  },
-                                  body: JSON.stringify({
-                                    entityId: selectedEntity.id,
-                                    label: newCredLabel.trim(),
-                                    email: newCredEmail.trim() || undefined,
-                                    password: newCredPassword || undefined,
-                                    authProvider: newCredAuthProvider,
-                                  }),
-                                }
-                              );
-                              const data = await res.json();
-                              if (data.success && data.data) {
-                                await fetchCredentials();
-                                setSelectedCredentialId(String(data.data.id));
-                                setShowNewCredentialForm(false);
-                                setNewCredLabel('');
-                                setNewCredEmail('');
-                                setNewCredPassword('');
-                                setNewCredAuthProvider('email_password');
-                                if (data.data.loginUrl && !loginUrl) {
-                                  setLoginUrl(data.data.loginUrl);
-                                }
-                              } else {
-                                setError(
-                                  normalizeApiError(
-                                    data,
-                                    'Failed to save credential'
-                                  )
-                                );
-                              }
-                            } catch (err) {
-                              logPanel('save-credential:failed', {
-                                error:
-                                  err instanceof Error
-                                    ? err.message
-                                    : String(err),
-                              });
-                              setError('Failed to save credential');
-                            } finally {
-                              setSavingCredential(false);
-                            }
-                          }}
-                          disabled={savingCredential || !newCredLabel.trim()}
+                          onClick={() => void saveUserData()}
+                          disabled={userDataSaving || userDataEnvId == null}
                           className='w-full bg-blue-600 text-white text-xs font-medium py-1.5 rounded hover:bg-blue-700 disabled:bg-blue-400'
                         >
-                          {savingCredential ? 'Saving...' : 'Save Credential'}
+                          {userDataSaving ? 'Saving…' : 'Save environment data'}
                         </button>
-                      </div>
+                      </>
                     )}
-
-                    <div>
-                      <label className='block text-[10px] font-medium text-gray-500 mb-0.5'>
-                        Login URL (optional)
-                      </label>
-                      <input
-                        type='text'
-                        value={loginUrl}
-                        onChange={e => setLoginUrl(e.target.value)}
-                        placeholder='https://example.com/login'
-                        className='w-full border border-gray-300 rounded px-2 py-1 text-xs'
-                      />
-                    </div>
                   </div>
                 )}
               </>
