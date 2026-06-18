@@ -2,10 +2,8 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuthStatus } from '@sudobility/auth-components';
 import { getFirebaseAuth } from '@sudobility/auth_lib';
 import type { NetworkClient } from '@sudobility/types';
-import {
-  useEntityManager,
-  usePersistedState,
-} from '@sudobility/testomniac_lib';
+import { usePersistedState } from '@sudobility/testomniac_lib';
+import { EntityClient, useEntities } from '@sudobility/entity_client';
 import { chromeStorageAdapter } from '../storage/chromeStorageAdapter';
 import {
   signInWithEmailAndPassword,
@@ -663,12 +661,14 @@ export function SidePanel() {
   }, [showSettings]);
 
   // Entity & product selection
-  const { entities, isLoading: loadingEntities } = useEntityManager({
-    networkClient,
-    baseUrl: API_URL,
-    token: token ?? '',
-    enabled: isAuthenticated && !!token,
-  });
+  const entityClient = useMemo(
+    () => new EntityClient({ baseUrl: `${API_URL}/api/v1`, networkClient }),
+    [networkClient]
+  );
+  const { data: entities = [], isLoading: loadingEntities } = useEntities(
+    entityClient,
+    { enabled: isAuthenticated && !!token }
+  );
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
