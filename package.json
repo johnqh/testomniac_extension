@@ -1,6 +1,6 @@
 {
   "name": "testomniac_extension",
-  "version": "0.1.188",
+  "version": "0.1.189",
   "description": "AI-powered automated UI testing Chrome extension",
   "type": "module",
   "scripts": {
@@ -46,7 +46,7 @@
     "@sudobility/di": "^1.5.58",
     "@sudobility/di_web": "^0.1.196",
     "@sudobility/testomniac_client": "^0.0.97",
-    "@sudobility/testomniac_lib": "^0.0.106",
+    "@sudobility/testomniac_lib": "^0.0.108",
     "@sudobility/testomniac_runner_service": "^0.1.150",
     "@sudobility/testomniac_types": "^0.0.77",
     "@sudobility/types": "^1.9.62",
