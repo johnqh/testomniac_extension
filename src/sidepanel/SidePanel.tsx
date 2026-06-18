@@ -14,6 +14,7 @@ import {
 import { LoginPage } from '@sudobility/building_blocks';
 import { Combobox, Input } from '@sudobility/components';
 import { useAuthTokenSync } from './hooks/useAuthTokenSync';
+import { DashboardPanel } from './dashboard/DashboardPanel';
 import { chromeGoogleSignIn } from './auth/googleSignIn';
 import {
   environmentOptions,
@@ -432,7 +433,7 @@ const initialProgress: ScanProgress = {
 };
 
 type ResultTab = 'overview' | 'issues' | 'details';
-type AppView = 'home' | 'scenarios' | 'scenario-detail';
+type AppView = 'home' | 'scenarios' | 'scenario-detail' | 'dashboard';
 
 const EXPERTISE_OPTIONS: ExpertiseOption[] = [
   { slug: 'tester', label: 'Tester', required: true },
@@ -2177,6 +2178,14 @@ export function SidePanel() {
               Scenarios
             </button>
           )}
+          {selectedEntityId && (
+            <button
+              onClick={() => setAppView('dashboard')}
+              className='w-full py-1.5 px-3 text-xs font-medium rounded-md border border-gray-300 text-gray-600 hover:bg-gray-50'
+            >
+              Dashboard
+            </button>
+          )}
         </div>
       )}
 
@@ -2610,7 +2619,29 @@ export function SidePanel() {
   // Scenarios View
   return (
     <div className='relative min-h-screen pb-8'>
-      {appView === 'scenario-detail' && selectedScenario ? (
+      {appView === 'dashboard' ? (
+        <div className='flex flex-col h-screen'>
+          <div className='flex items-center gap-2 border-b border-gray-200 px-3 py-2'>
+            <button
+              onClick={() => setAppView('home')}
+              className='text-xs text-gray-600 hover:text-gray-900'
+            >
+              ← Back
+            </button>
+            <span className='text-xs font-medium text-gray-700'>Dashboard</span>
+          </div>
+          <div className='flex-1 overflow-y-auto'>
+            <DashboardPanel
+              networkClient={networkClient}
+              token={token ?? ''}
+              apiUrl={API_URL}
+              entitySlug={
+                entities.find(e => e.id === selectedEntityId)?.entitySlug ?? ''
+              }
+            />
+          </div>
+        </div>
+      ) : appView === 'scenario-detail' && selectedScenario ? (
         <div className='p-3 space-y-3 text-sm flex flex-col h-screen'>
           <ScenarioDetailView
             scenario={selectedScenario}

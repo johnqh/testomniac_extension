@@ -5,6 +5,7 @@ export default {
     './node_modules/@sudobility/components/**/*.{js,jsx,ts,tsx}',
     './node_modules/@sudobility/design/**/*.{js,jsx,ts,tsx}',
     './node_modules/@sudobility/building_blocks/**/*.{js,jsx,ts,tsx}',
+    './node_modules/@sudobility/testomniac_ui/**/*.{js,jsx,ts,tsx}',
     './node_modules/@sudobility/auth-components/**/*.{js,jsx,ts,tsx}',
   ],
   theme: {
