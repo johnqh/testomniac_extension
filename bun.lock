@@ -18,7 +18,7 @@
         "@sudobility/testomniac_lib": "^0.0.109",
         "@sudobility/testomniac_runner_service": "^0.1.150",
         "@sudobility/testomniac_types": "^0.0.77",
-        "@sudobility/testomniac_ui": "^0.0.2",
+        "@sudobility/testomniac_ui": "^0.0.3",
         "@sudobility/types": "^1.9.62",
         "@tanstack/react-query": "^5.90.5",
         "@tanstack/react-table": "^8.21.3",
@@ -464,7 +464,7 @@
 
     "@sudobility/testomniac_types": ["@sudobility/testomniac_types@0.0.77", "", { "peerDependencies": { "@sudobility/types": "^1.9.62" } }, "sha512-Jj+caqdxsl9NvzNK5IF/WtmTQQhM2On+z5bOIdNm1OjnzEqWwvxoDRUQGsxEXC2Ymo1nfoJdc1wxNJCWcUSSdA=="],
 
-    "@sudobility/testomniac_ui": ["@sudobility/testomniac_ui@0.0.2", "", { "peerDependencies": { "@heroicons/react": ">=2.0.0", "@sudobility/components": "^5.0.80", "@sudobility/design": "^1.1.32", "@sudobility/testomniac_client": "^0.0.98", "@sudobility/testomniac_lib": "^0.0.109", "@sudobility/testomniac_types": "^0.0.77", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "@tanstack/react-table": ">=8.0.0", "@xyflow/react": ">=12.0.0", "react": ">=18.0.0", "react-dom": ">=18.0.0" } }, "sha512-K+SCTZe/xxFcHyijKSyaagcG3V2Bw6M/+I92IB9gYLiotxd6RsKhOjd19+qQYQHhUmXort3bYPEL5h68gvnXlA=="],
+    "@sudobility/testomniac_ui": ["@sudobility/testomniac_ui@0.0.3", "", { "peerDependencies": { "@heroicons/react": ">=2.0.0", "@sudobility/components": "^5.0.80", "@sudobility/design": "^1.1.32", "@sudobility/testomniac_client": "^0.0.98", "@sudobility/testomniac_lib": "^0.0.109", "@sudobility/testomniac_types": "^0.0.77", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "@tanstack/react-table": ">=8.0.0", "@xyflow/react": ">=12.0.0", "react": ">=18.0.0", "react-dom": ">=18.0.0" } }, "sha512-X3bGBeIunofLCPqoWtDTNe3n1TkUw3+zXKVyYlQVfjB4W0JkmBFdS7dHgY3aqMZTpQkQTKvy9mT0SuuhiLttqA=="],
 
     "@sudobility/types": ["@sudobility/types@1.9.62", "", {}, "sha512-GOkz5oE7Fmlolba2aemBF2fKPtH4I2lHAjVta+fqZAoAV72DQaWYzVEjTwKZs/ACY/g9Z262IDa7lEh+IOrn7w=="],
 

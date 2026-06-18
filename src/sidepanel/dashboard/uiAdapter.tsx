@@ -4,6 +4,7 @@ import {
   RoutingProvider,
   type NavigateOptions,
 } from '@sudobility/testomniac_ui';
+import { testomniacRoutes } from './testomniacRoutes';
 
 /**
  * Per-route adapter that feeds the extension's MemoryRouter params + navigation
@@ -28,6 +29,7 @@ export function UiRoute({ children }: { children: ReactNode }) {
       pathname={pathname}
       currentLanguage='en'
       navigate={nav}
+      routes={testomniacRoutes}
     >
       {children}
     </RoutingProvider>
