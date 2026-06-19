@@ -1,4 +1,11 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
+import type { NetworkClient } from '@sudobility/types';
+import {
+  useCreateTestScenario,
+  useUpdateTestScenario,
+  useDeleteTestScenario,
+  useEndScan,
+} from '@sudobility/testomniac_client';
 
 interface ScenarioItem {
   id: number;
@@ -14,6 +21,7 @@ interface ScenariosListViewProps {
   loading: boolean;
   token: string;
   apiUrl: string;
+  networkClient: NetworkClient;
   runnerId: number;
   productId: number;
   testEnvironmentId: number | null;
@@ -28,6 +36,7 @@ export function ScenariosListView({
   loading,
   token,
   apiUrl,
+  networkClient,
   runnerId,
   productId,
   onRefresh,
@@ -44,13 +53,20 @@ export function ScenariosListView({
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const headers = useMemo(
-    () => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    }),
-    [token]
+  const baseUrl = `${apiUrl}/api/v1`;
+  const createTestScenarioMutation = useCreateTestScenario(
+    networkClient,
+    baseUrl
   );
+  const updateTestScenarioMutation = useUpdateTestScenario(
+    networkClient,
+    baseUrl
+  );
+  const deleteTestScenarioMutation = useDeleteTestScenario(
+    networkClient,
+    baseUrl
+  );
+  const endScanMutation = useEndScan(networkClient, baseUrl);
 
   const resetForm = () => {
     setFormTitle('');
@@ -65,20 +81,28 @@ export function ScenariosListView({
     setSaving(true);
     setError(null);
     try {
-      const isEdit = editingId != null;
-      const url = isEdit
-        ? `${apiUrl}/api/v1/runners/${runnerId}/test-scenarios/${editingId}`
-        : `${apiUrl}/api/v1/runners/${runnerId}/test-scenarios`;
-      const res = await fetch(url, {
-        method: isEdit ? 'PUT' : 'POST',
-        headers,
-        body: JSON.stringify({
-          title: formTitle.trim(),
-          startingPath: formPath.trim(),
-          prompt: formPrompt.trim(),
-        }),
-      });
-      const json = await res.json();
+      const json =
+        editingId != null
+          ? await updateTestScenarioMutation.mutateAsync({
+              token,
+              runnerId,
+              scenarioId: editingId,
+              data: {
+                title: formTitle.trim(),
+                startingPath: formPath.trim(),
+                prompt: formPrompt.trim(),
+              },
+            })
+          : await createTestScenarioMutation.mutateAsync({
+              token,
+              runnerId,
+              data: {
+                runnerId,
+                title: formTitle.trim(),
+                startingPath: formPath.trim(),
+                prompt: formPrompt.trim(),
+              },
+            });
       if (!json.success) {
         setError(json.error ?? 'Failed to save');
         return;
@@ -95,25 +119,27 @@ export function ScenariosListView({
     formPath,
     formPrompt,
     editingId,
-    apiUrl,
     runnerId,
-    headers,
+    token,
+    createTestScenarioMutation,
+    updateTestScenarioMutation,
     onRefresh,
   ]);
 
   const handleDelete = useCallback(
     async (id: number) => {
       try {
-        await fetch(
-          `${apiUrl}/api/v1/runners/${runnerId}/test-scenarios/${id}`,
-          { method: 'DELETE', headers }
-        );
+        await deleteTestScenarioMutation.mutateAsync({
+          token,
+          runnerId,
+          scenarioId: id,
+        });
         onRefresh();
       } catch {
         // ignore
       }
     },
-    [apiUrl, runnerId, headers, onRefresh]
+    [deleteTestScenarioMutation, token, runnerId, onRefresh]
   );
 
   const handleEdit = (s: ScenarioItem) => {
@@ -128,12 +154,10 @@ export function ScenariosListView({
     setDetecting(true);
     setError(null);
     try {
-      const res = await fetch(`${apiUrl}/api/v1/scan/end`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ productId }),
+      const json = await endScanMutation.mutateAsync({
+        token,
+        data: { productId },
       });
-      const json = await res.json();
       if (!json.success) {
         setError(json.error ?? 'Detection failed');
         return;
@@ -144,7 +168,7 @@ export function ScenariosListView({
     } finally {
       setDetecting(false);
     }
-  }, [apiUrl, productId, headers, onRefresh]);
+  }, [productId, token, endScanMutation, onRefresh]);
 
   return (
     <div className='space-y-3'>

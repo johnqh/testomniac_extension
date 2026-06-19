@@ -983,6 +983,17 @@ async function resumePausedScan() {
 // Scenario Execution
 // ============================================================================
 
+// Persisted test action plus the locator fields the scenario runner relies on
+// (returned by the API but not part of the shared TestActionResponse type).
+interface ScenarioAction {
+  actionType: string;
+  stepOrder: number;
+  path?: string | null;
+  value?: string | null;
+  playwrightLocator?: string | null;
+  selector?: string | null;
+}
+
 async function runScenario(
   scenarioId: number,
   _runnerId: number,
@@ -997,27 +1008,21 @@ async function runScenario(
     return;
   }
 
+  // Scanner-key-authenticated client (service workers can't use React hooks).
+  const api = new ApiClient(baseUrl, key);
+
   try {
     startKeepalive();
 
-    // Fetch scenario's generated test interactions
-    const scenarioRes = await fetch(
-      `${baseUrl}/api/v1/test-scenarios/${scenarioId}`,
-      { headers: { 'X-Scanner-Key': key } }
-    );
-    const scenarioJson = await scenarioRes.json();
-    if (!scenarioJson.success) {
+    // Validate the scenario exists before doing any work.
+    const scenario = await api.getTestScenario(scenarioId);
+    if (!scenario) {
       ERR('runScenario: failed to fetch scenario');
       return;
     }
 
     // Fetch sequences for this scenario
-    const seqRes = await fetch(
-      `${baseUrl}/api/v1/test-scenarios/${scenarioId}/sequences`,
-      { headers: { 'X-Scanner-Key': key } }
-    );
-    const seqJson = await seqRes.json();
-    const sequences = seqJson.success ? (seqJson.data ?? []) : [];
+    const sequences = await api.getTestScenarioSequencesByScenario(scenarioId);
 
     if (sequences.length === 0) {
       LOG('runScenario: no sequences found');
@@ -1033,12 +1038,7 @@ async function runScenario(
     const sequence = sequences[0];
 
     // Fetch linked test interactions for this sequence
-    const linksRes = await fetch(
-      `${baseUrl}/api/v1/test-scenarios/sequences/${sequence.id}/test-interactions`,
-      { headers: { 'X-Scanner-Key': key } }
-    );
-    const linksJson = await linksRes.json();
-    const links = linksJson.success ? (linksJson.data ?? []) : [];
+    const links = await api.getSequenceTestInteractions(sequence.id);
 
     if (links.length === 0) {
       LOG('runScenario: no interactions in sequence');
@@ -1092,13 +1092,11 @@ async function runScenario(
         status: 'running',
       });
 
-      // Fetch test actions for this interaction
-      const actionsRes = await fetch(
-        `${baseUrl}/api/v1/test-interactions/${link.testInteractionId}/actions`,
-        { headers: { 'X-Scanner-Key': key } }
-      );
-      const actionsJson = await actionsRes.json();
-      const actions = actionsJson.success ? (actionsJson.data ?? []) : [];
+      // Fetch test actions for this interaction. The endpoint returns extra
+      // locator fields not present on the shared TestActionResponse type.
+      const actions = (await api.getTestInteractionActions(
+        link.testInteractionId
+      )) as ScenarioAction[];
 
       // Sort by stepOrder
       actions.sort(
@@ -1120,7 +1118,7 @@ async function runScenario(
             case 'click':
               if (action.playwrightLocator || action.selector) {
                 await adapter.click(
-                  action.playwrightLocator || action.selector,
+                  (action.playwrightLocator || action.selector)!,
                   { timeout: 10000 }
                 );
               }
@@ -1128,7 +1126,7 @@ async function runScenario(
             case 'hover':
               if (action.playwrightLocator || action.selector) {
                 await adapter.hover(
-                  action.playwrightLocator || action.selector,
+                  (action.playwrightLocator || action.selector)!,
                   { timeout: 10000 }
                 );
               }
@@ -1140,7 +1138,7 @@ async function runScenario(
                 action.value != null
               ) {
                 await adapter.type(
-                  action.playwrightLocator || action.selector,
+                  (action.playwrightLocator || action.selector)!,
                   action.value
                 );
               }
@@ -1156,7 +1154,7 @@ async function runScenario(
                 action.value != null
               ) {
                 await adapter.select(
-                  action.playwrightLocator || action.selector,
+                  (action.playwrightLocator || action.selector)!,
                   action.value
                 );
               }

@@ -1,9 +1,27 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuthStatus } from '@sudobility/auth-components';
-import { getFirebaseAuth } from '@sudobility/auth_lib';
-import type { NetworkClient } from '@sudobility/types';
+import {
+  getFirebaseAuth,
+  useFirebaseAuthNetworkClient,
+} from '@sudobility/auth_lib';
 import { usePersistedState } from '@sudobility/testomniac_lib';
 import { EntityClient, useEntities } from '@sudobility/entity_client';
+import {
+  TestomniacClient,
+  useEntityProducts,
+  useCreateProduct,
+  useResolveTestEnvironment,
+  useEnvironmentUserData,
+  useUpdateEnvironmentUserData,
+  useSubmitScan,
+  useRunLiveDashboard,
+  useRunnerTestScenarios,
+} from '@sudobility/testomniac_client';
+import { useQueries } from '@tanstack/react-query';
+import type {
+  CreateDiscoveryRunRequest,
+  UserData,
+} from '@sudobility/testomniac_types';
 import { chromeStorageAdapter } from '../storage/chromeStorageAdapter';
 import {
   signInWithEmailAndPassword,
@@ -241,14 +259,6 @@ interface ExpertiseOption {
   required?: boolean;
 }
 
-interface ResolveEnvironmentApiResponse {
-  testEnvironmentId: number;
-  kind: 'local' | 'shared';
-  label: string;
-  ownerUserId: string | null;
-  resolutionMode: 'local_user_owned' | 'shared_labeled';
-}
-
 interface ScanProgress {
   isRunning?: boolean;
   isPaused?: boolean;
@@ -401,19 +411,6 @@ interface RunPageSummary {
   errors: number;
 }
 
-interface ProductEnvironmentOption {
-  id: number;
-  productId: number;
-  title: string;
-  baseUrl: string;
-  kind: 'local' | 'shared';
-  label: string;
-  ownerUserId: string | null;
-  githubBranch: string | null;
-  createdAt: string | null;
-  updatedAt: string | null;
-}
-
 const initialProgress: ScanProgress = {
   scanId: null,
   phase: 'idle',
@@ -543,52 +540,9 @@ export function SidePanel() {
   const { user, isAuthenticated, loading, signOut } = useAuthStatus();
   const token = useAuthTokenSync();
 
-  // NetworkClient for shared hooks (wraps fetch with the existing token)
-  const networkClient = useMemo<NetworkClient>(
-    () => ({
-      async request(url, options) {
-        const res = await fetch(url, {
-          method: options?.method ?? 'GET',
-          headers: options?.headers ?? undefined,
-          body: options?.body as string | undefined,
-          signal: options?.signal ?? undefined,
-        });
-        const data = await res.json();
-        return {
-          success: data.success ?? res.ok,
-          data,
-          ok: res.ok,
-          status: res.status,
-          statusText: res.statusText,
-          headers: {},
-          timestamp: new Date().toISOString(),
-        };
-      },
-      async get(url, options) {
-        return this.request(url, { ...options, method: 'GET' });
-      },
-      async post(url, body, options) {
-        return this.request(url, {
-          ...options,
-          method: 'POST',
-          body: body != null ? JSON.stringify(body) : undefined,
-          headers: { 'Content-Type': 'application/json', ...options?.headers },
-        });
-      },
-      async put(url, body, options) {
-        return this.request(url, {
-          ...options,
-          method: 'PUT',
-          body: body != null ? JSON.stringify(body) : undefined,
-          headers: { 'Content-Type': 'application/json', ...options?.headers },
-        });
-      },
-      async delete(url, options) {
-        return this.request(url, { ...options, method: 'DELETE' });
-      },
-    }),
-    []
-  );
+  // NetworkClient for shared hooks — automatically injects the Firebase ID
+  // token, refreshes it on 401, and logs out on 403.
+  const networkClient = useFirebaseAuthNetworkClient();
   const [activeTabUrl, setActiveTabUrl] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -607,10 +561,6 @@ export function SidePanel() {
     string | null
   >(null);
   const eventLogRef = useRef<HTMLDivElement>(null);
-  const environmentCacheRef = useRef<Map<number, ProductEnvironmentOption[]>>(
-    new Map()
-  );
-  const cachedProductIdsRef = useRef<string>('');
   const [error, setError] = useState<string | null>(null);
   const [resultTab, setResultTab] = useState<ResultTab>('overview');
   const [appView, setAppView] = useState<AppView>('home');
@@ -636,8 +586,6 @@ export function SidePanel() {
     prompt: string;
     sizeClass: string;
   }
-  const [scenarios, setScenarios] = useState<ScenarioItem[]>([]);
-  const [loadingScenarios, setLoadingScenarios] = useState(false);
   const [runningScenarioId, setRunningScenarioId] = useState<number | null>(
     null
   );
@@ -661,18 +609,74 @@ export function SidePanel() {
   }, [showSettings]);
 
   // Entity & product selection
+  const tmBaseUrl = `${API_URL}/api/v1`;
+  const tmClient = useMemo(
+    () => new TestomniacClient(networkClient, tmBaseUrl),
+    [tmBaseUrl, networkClient]
+  );
   const entityClient = useMemo(
-    () => new EntityClient({ baseUrl: `${API_URL}/api/v1`, networkClient }),
-    [networkClient]
+    () => new EntityClient({ baseUrl: tmBaseUrl, networkClient }),
+    [tmBaseUrl, networkClient]
   );
   const { data: entities = [], isLoading: loadingEntities } = useEntities(
     entityClient,
     { enabled: isAuthenticated && !!token }
   );
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
+  const selectedEntity = entities.find(e => e.id === selectedEntityId) ?? null;
+
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [loadingProducts, setLoadingProducts] = useState(false);
+
+  // Products for the selected entity (drives the product dropdown).
+  const entityProductsQuery = useEntityProducts(
+    networkClient,
+    tmBaseUrl,
+    token ?? '',
+    selectedEntity?.entitySlug ?? '',
+    { enabled: isAuthenticated && !!token && !!selectedEntity }
+  );
+  const entityProductsData = entityProductsQuery.data?.data;
+  const entityProducts = useMemo(
+    () => (entityProductsData ?? []) as unknown as ProductOption[],
+    [entityProductsData]
+  );
+  const loadingProducts = entityProductsQuery.isLoading;
+  const refetchProducts = entityProductsQuery.refetch;
+
+  const createProductMutation = useCreateProduct(networkClient, tmBaseUrl);
+  const resolveTestEnvironmentMutation = useResolveTestEnvironment(
+    networkClient,
+    tmBaseUrl
+  );
+  const isResolving = resolveTestEnvironmentMutation.isPending;
+  const updateEnvironmentUserDataMutation = useUpdateEnvironmentUserData(
+    networkClient,
+    tmBaseUrl
+  );
+  const userDataSaving = updateEnvironmentUserDataMutation.isPending;
+  const submitScanMutation = useSubmitScan(networkClient, tmBaseUrl);
+  // Scenarios for the active run's runner (loaded reactively once a run exists).
+  const scenariosRunnerId = runSummary?.runnerId ?? 0;
+  const scenariosQuery = useRunnerTestScenarios(
+    networkClient,
+    tmBaseUrl,
+    token ?? '',
+    scenariosRunnerId,
+    { enabled: !!token && !!scenariosRunnerId }
+  );
+  const scenarios = (scenariosQuery.data?.data ?? []) as unknown as Array<{
+    id: number;
+    title: string;
+    startingPath: string;
+    prompt: string;
+    sizeClass: string;
+  }>;
+  const loadingScenarios = scenariosQuery.isLoading;
+  const refetchScenariosQuery = scenariosQuery.refetch;
+  const fetchScenarios = useCallback(() => {
+    void refetchScenariosQuery();
+  }, [refetchScenariosQuery]);
   const [selectedEnvironment, setSelectedEnvironment] =
     useState<EnvironmentChoice>('production');
   const [customEnvironmentLabel, setCustomEnvironmentLabel] = useState('');
@@ -701,9 +705,35 @@ export function SidePanel() {
   const [userDataJson, setUserDataJson] = useState('{}');
   const [credEmail, setCredEmail] = useState('');
   const [credPassword, setCredPassword] = useState('');
-  const [userDataLoading, setUserDataLoading] = useState(false);
-  const [userDataSaving, setUserDataSaving] = useState(false);
   const [userDataError, setUserDataError] = useState<string | null>(null);
+
+  // userData is environment-scoped; once the environment is resolved the blob
+  // is fetched reactively and mirrored into the editor fields below.
+  const userDataQuery = useEnvironmentUserData(
+    networkClient,
+    tmBaseUrl,
+    token ?? '',
+    userDataEnvId,
+    { enabled: userDataEnvId != null && !!token }
+  );
+  const loadedUserData = userDataQuery.data?.data?.data ?? null;
+  const userDataQueryLoading = userDataQuery.isLoading;
+  const userDataLoading = isResolving || userDataQueryLoading;
+
+  useEffect(() => {
+    if (!loadedUserData) return;
+    setUserDataJson(JSON.stringify(loadedUserData, null, 2));
+    setCredEmail(loadedUserData.credential?.email ?? '');
+    setCredPassword(loadedUserData.credential?.password ?? '');
+    const credLoginUrl = (
+      loadedUserData.credential as Record<string, unknown> | undefined
+    )?.loginUrl;
+    if (credLoginUrl && !loginUrl) {
+      setLoginUrl(String(credLoginUrl));
+    }
+    // loginUrl intentionally excluded: only seed it once when empty.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadedUserData]);
 
   const mergeProgress = useCallback(
     (prev: ScanProgress, next: ScanProgress): ScanProgress => {
@@ -754,50 +784,38 @@ export function SidePanel() {
     }
   }, [entities, selectedEntityId]);
 
-  // Fetch products when entity is selected
+  // Keep the local product list in sync with the entity's products query.
+  // Product selection is handled by the environment auto-select effect below.
   useEffect(() => {
     if (!selectedEntityId || !token) {
       setProducts(prev => (prev.length === 0 ? prev : []));
       setSelectedProductId(prev => (prev === '' ? prev : ''));
       return;
     }
-    const entity = entities.find(e => e.id === selectedEntityId);
-    if (!entity) return;
-    setLoadingProducts(true);
-    fetch(`${API_URL}/api/v1/entities/${entity.entitySlug}/products`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.json())
-      .then(data => {
-        if (data.success && Array.isArray(data.data)) {
-          setProducts(data.data);
-          // Auto-select "Create Product" if no existing products
-          if (data.data.length === 0) {
-            setSelectedProductId('__create__');
-          } else {
-            setSelectedProductId('');
-          }
-        }
-      })
-      .catch(err =>
-        logPanel('fetch-products:failed', {
-          error: err instanceof Error ? err.message : String(err),
-        })
-      )
-      .finally(() => setLoadingProducts(false));
-  }, [selectedEntityId, token, entities]);
+    setProducts(entityProducts);
+  }, [selectedEntityId, token, entityProducts]);
 
-  // Invalidate environment cache when the product set changes
-  useEffect(() => {
-    const productIdKey = products
-      .map(p => p.id)
-      .sort((a, b) => Number(a) - Number(b))
-      .join(',');
-    if (productIdKey !== cachedProductIdsRef.current) {
-      environmentCacheRef.current.clear();
-      cachedProductIdsRef.current = productIdKey;
-    }
-  }, [products]);
+  // Per-product environments, fetched (and cached) by React Query. Used to
+  // auto-select the product whose environment matches the active tab URL.
+  const productEnvQueries = useQueries({
+    queries: products.map(p => ({
+      queryKey: ['testomniac', 'product', Number(p.id), 'environments'],
+      queryFn: () => tmClient.getProductEnvironments(token ?? '', Number(p.id)),
+      enabled: !!token && !!activeTabUrl && products.length > 0,
+      staleTime: 5 * 60 * 1000,
+    })),
+  });
+  // Stable signal that only changes when the underlying environment data (or
+  // load state) changes — keeps the effect below from re-running every render
+  // and clobbering a manual product selection.
+  const productEnvSignature = productEnvQueries
+    .map(
+      (q, i) =>
+        `${products[i]?.id ?? ''}:${
+          q.isLoading ? 'L' : (q.data?.data ?? []).map(e => e.baseUrl).join(',')
+        }`
+    )
+    .join('|');
 
   useEffect(() => {
     if (!token || !activeTabUrl || products.length === 0) {
@@ -808,97 +826,40 @@ export function SidePanel() {
       }
       return;
     }
+    // Wait until every product's environments query has resolved.
+    if (productEnvQueries.some(q => q.isLoading)) return;
 
-    let cancelled = false;
-    const currentTabUrl = activeTabUrl;
-
-    async function autoSelectProductFromEnvironment() {
-      let activeUrl: URL;
-      try {
-        activeUrl = new URL(currentTabUrl);
-      } catch {
-        setSelectedProductId('__create__');
-        return;
-      }
-
-      const cache = environmentCacheRef.current;
-      const uncachedProducts = products.filter(p => !cache.has(Number(p.id)));
-
-      if (uncachedProducts.length > 0) {
-        const freshResults = await Promise.all(
-          uncachedProducts.map(async product => {
-            try {
-              const response = await fetch(
-                `${API_URL}/api/v1/products/${product.id}/environments`,
-                {
-                  headers: { Authorization: `Bearer ${token}` },
-                }
-              );
-              const data = await response.json();
-              const environments =
-                data.success && Array.isArray(data.data)
-                  ? (data.data as ProductEnvironmentOption[])
-                  : [];
-              return { product, environments };
-            } catch (err) {
-              logPanel('fetch-environments:failed', {
-                productId: product.id,
-                error: err instanceof Error ? err.message : String(err),
-              });
-              return {
-                product,
-                environments: [] as ProductEnvironmentOption[],
-              };
-            }
-          })
-        );
-
-        for (const { product, environments } of freshResults) {
-          cache.set(Number(product.id), environments);
-        }
-      }
-
-      const environmentResponses = products.map(product => ({
-        product,
-        environments: cache.get(Number(product.id)) ?? [],
-      }));
-
-      if (cancelled) {
-        return;
-      }
-
-      let bestMatch: { productId: string; score: number } | null = null;
-
-      for (const { product, environments } of environmentResponses) {
-        for (const environment of environments) {
-          const score = getEnvironmentMatchScore(
-            activeUrl,
-            environment.baseUrl
-          );
-          if (
-            score > 0 &&
-            (!bestMatch ||
-              score > bestMatch.score ||
-              (score === bestMatch.score &&
-                Number(product.id) < Number(bestMatch.productId)))
-          ) {
-            bestMatch = {
-              productId: String(product.id),
-              score,
-            };
-          }
-        }
-      }
-
-      setSelectedProductId(bestMatch?.productId ?? '__create__');
+    let activeUrl: URL;
+    try {
+      activeUrl = new URL(activeTabUrl);
+    } catch {
+      setSelectedProductId('__create__');
+      return;
     }
 
-    void autoSelectProductFromEnvironment();
+    let bestMatch: { productId: string; score: number } | null = null;
+    for (let idx = 0; idx < products.length; idx++) {
+      const product = products[idx];
+      const environments = productEnvQueries[idx]?.data?.data ?? [];
+      for (const environment of environments) {
+        const score = getEnvironmentMatchScore(activeUrl, environment.baseUrl);
+        if (
+          score > 0 &&
+          (!bestMatch ||
+            score > bestMatch.score ||
+            (score === bestMatch.score &&
+              Number(product.id) < Number(bestMatch.productId)))
+        ) {
+          bestMatch = { productId: String(product.id), score };
+        }
+      }
+    }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [activeTabUrl, products, token]);
+    setSelectedProductId(bestMatch?.productId ?? '__create__');
+    // productEnvQueries is intentionally excluded; productEnvSignature captures
+    // its meaningful changes without re-running on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabUrl, products, token, productEnvSignature]);
 
   // Get active tab URL
   useEffect(() => {
@@ -964,58 +925,36 @@ export function SidePanel() {
       setUserDataError('Select a product first');
       return;
     }
-    setUserDataLoading(true);
     setUserDataError(null);
     try {
-      const headers = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      };
       const baseUrl = new URL(activeTabUrl).origin;
-      const envRes = await fetch(
-        `${API_URL}/api/v1/test-environments/resolve`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            productId: Number(selectedProductId),
-            url: activeTabUrl,
-            baseUrl,
-            source: 'extension',
-            environmentLabel: isLocalEnvironment
-              ? undefined
-              : resolvedEnvironmentLabel,
-          }),
-        }
-      );
-      const envData = await envRes.json();
-      const envId = envData?.data?.testEnvironmentId;
-      if (!envData?.success || !envId) {
+      const envRes = await resolveTestEnvironmentMutation.mutateAsync({
+        token: token ?? '',
+        data: {
+          productId: Number(selectedProductId),
+          url: activeTabUrl,
+          baseUrl,
+          source: 'extension',
+          environmentLabel: isLocalEnvironment
+            ? undefined
+            : resolvedEnvironmentLabel,
+        },
+      });
+      const envId = envRes?.data?.testEnvironmentId;
+      if (!envRes?.success || !envId) {
         setUserDataError(
-          normalizeApiError(envData, 'Failed to resolve environment')
+          normalizeApiError(envRes, 'Failed to resolve environment')
         );
         return;
       }
+      // Setting the env id triggers useEnvironmentUserData, which loads the
+      // blob and mirrors it into the editor fields.
       setUserDataEnvId(envId);
-      const udRes = await fetch(
-        `${API_URL}/api/v1/test-environments/${envId}/user-data`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const udJson = await udRes.json();
-      const data = (udJson?.success ? udJson.data?.data : {}) ?? {};
-      setUserDataJson(JSON.stringify(data, null, 2));
-      setCredEmail(data.credential?.email ?? '');
-      setCredPassword(data.credential?.password ?? '');
-      if (data.credential?.loginUrl && !loginUrl) {
-        setLoginUrl(String(data.credential.loginUrl));
-      }
     } catch (err) {
       logPanel('load-user-data:failed', {
         error: err instanceof Error ? err.message : String(err),
       });
       setUserDataError('Failed to load environment data');
-    } finally {
-      setUserDataLoading(false);
     }
   }, [
     activeTabUrl,
@@ -1023,7 +962,7 @@ export function SidePanel() {
     selectedProductId,
     isLocalEnvironment,
     resolvedEnvironmentLabel,
-    loginUrl,
+    resolveTestEnvironmentMutation,
   ]);
 
   const saveUserData = useCallback(async () => {
@@ -1043,23 +982,15 @@ export function SidePanel() {
         password: credPassword || undefined,
       };
     }
-    setUserDataSaving(true);
     setUserDataError(null);
     try {
-      const res = await fetch(
-        `${API_URL}/api/v1/test-environments/${userDataEnvId}/user-data`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ data }),
-        }
-      );
-      const json = await res.json();
+      const json = await updateEnvironmentUserDataMutation.mutateAsync({
+        token: token ?? '',
+        environmentId: userDataEnvId,
+        data: data as UserData,
+      });
       if (json?.success) {
-        setUserDataJson(JSON.stringify(json.data.data, null, 2));
+        setUserDataJson(JSON.stringify(json.data?.data ?? {}, null, 2));
       } else {
         setUserDataError(normalizeApiError(json, 'Failed to save user data'));
       }
@@ -1068,10 +999,15 @@ export function SidePanel() {
         error: err instanceof Error ? err.message : String(err),
       });
       setUserDataError('Failed to save user data');
-    } finally {
-      setUserDataSaving(false);
     }
-  }, [userDataEnvId, token, userDataJson, credEmail, credPassword]);
+  }, [
+    userDataEnvId,
+    token,
+    userDataJson,
+    credEmail,
+    credPassword,
+    updateEnvironmentUserDataMutation,
+  ]);
 
   // Load userData when the login/userData section is expanded.
   useEffect(() => {
@@ -1110,18 +1046,8 @@ export function SidePanel() {
     setIsSubmitting(true);
 
     try {
-      // Force-refresh the Firebase token before API calls to avoid stale tokens
-      const auth = (await import('firebase/auth')).getAuth();
-      const freshToken = auth.currentUser
-        ? await auth.currentUser.getIdToken(true)
-        : token;
-      console.log('[SidePanel] Token refreshed before API calls');
-
-      const headers = {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${freshToken}`,
-      };
-
+      // The Firebase auth networkClient injects + refreshes the token per call,
+      // so no manual token refresh / header construction is needed here.
       let productId: number;
 
       if (selectedProductId === '__create__') {
@@ -1134,29 +1060,25 @@ export function SidePanel() {
           entityId: selectedEntityId,
           title,
         });
-        const createRes = await fetch(`${API_URL}/api/v1/products`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
+        const createData = await createProductMutation.mutateAsync({
+          token: token ?? '',
+          data: {
             entityId: selectedEntityId,
             title,
-          }),
+          },
         });
-        const createData = await createRes.json();
         console.log('[SidePanel] Create product response:', createData);
         if (!createData.success || !createData.data?.id) {
-          const err =
-            createData.error ||
-            createData.data?.message ||
-            'Failed to create product';
+          const err = normalizeApiError(createData, 'Failed to create product');
           console.error('[SidePanel] Product creation failed:', err);
           setError(err);
           return;
         }
         productId = createData.data.id;
         console.log('[SidePanel] Product created, id:', productId);
-        setProducts(prev => [...prev, createData.data]);
+        setProducts(prev => [...prev, createData.data as ProductOption]);
         setSelectedProductId(String(productId));
+        void refetchProducts();
       } else {
         productId = Number(selectedProductId);
         console.log('[SidePanel] Using existing product:', productId);
@@ -1166,28 +1088,21 @@ export function SidePanel() {
 
       // Resolve environment before scan creation
       console.log('[SidePanel] Resolving environment for product', productId);
-      const environmentRes = await fetch(
-        `${API_URL}/api/v1/test-environments/resolve`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            productId,
-            url: activeTabUrl,
-            baseUrl,
-            source: 'extension',
-            environmentLabel: isLocalEnvironment
-              ? undefined
-              : resolvedEnvironmentLabel,
-          }),
-        }
-      );
-      const environmentData = await environmentRes.json();
+      const environmentData = await resolveTestEnvironmentMutation.mutateAsync({
+        token: token ?? '',
+        data: {
+          productId,
+          url: activeTabUrl,
+          baseUrl,
+          source: 'extension',
+          environmentLabel: isLocalEnvironment
+            ? undefined
+            : resolvedEnvironmentLabel,
+        },
+      });
       console.log('[SidePanel] Resolve environment response:', environmentData);
-      if (
-        !environmentData.success ||
-        !environmentData.data?.testEnvironmentId
-      ) {
+      const resolvedEnvironment = environmentData.data;
+      if (!environmentData.success || !resolvedEnvironment?.testEnvironmentId) {
         const err = normalizeApiError(
           environmentData,
           'Failed to resolve scan environment'
@@ -1196,8 +1111,6 @@ export function SidePanel() {
         setError(err);
         return;
       }
-      const resolvedEnvironment =
-        environmentData.data as ResolveEnvironmentApiResponse;
       console.log(
         '[SidePanel] Environment resolved:',
         resolvedEnvironment.testEnvironmentId,
@@ -1223,12 +1136,9 @@ export function SidePanel() {
           scanBody.loginUrl = loginUrl.trim();
         }
       }
-      const scanRes = await fetch(`${API_URL}/api/v1/scan`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(scanBody),
-      });
-      const scanData = await scanRes.json();
+      const scanData = await submitScanMutation.mutateAsync(
+        scanBody as unknown as CreateDiscoveryRunRequest
+      );
       console.log('[SidePanel] Create scan response:', scanData);
       if (scanData.success && scanData.data?.testRunId) {
         console.log(
@@ -1293,6 +1203,10 @@ export function SidePanel() {
     continueWithLogin,
     loginUrl,
     scanMode,
+    createProductMutation,
+    resolveTestEnvironmentMutation,
+    submitScanMutation,
+    refetchProducts,
   ]);
 
   // Auto-scroll event log
@@ -1381,159 +1295,107 @@ export function SidePanel() {
     return () => chrome.runtime.onMessage.removeListener(listener);
   }, [mergeProgress]);
 
-  useEffect(() => {
-    if (!token || !progress.scanId) return;
-    let cancelled = false;
-
-    const fetchLiveData = () =>
-      fetch(`${API_URL}/api/v1/runs/${progress.scanId}/live-dashboard`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then(response => response.json())
-        .then(
-          (dashboardData: {
-            success: boolean;
-            data: {
-              summary: RunSummary;
-              pagesSummary: RunPageSummary[];
-              navigationMap: NavigationMapData;
-              structure: RunStructureData | null;
-            };
-          }) => {
-            if (cancelled || !dashboardData?.success) return;
-            const {
-              summary,
-              pagesSummary: pages,
-              navigationMap,
-              structure,
-            } = dashboardData.data;
-
-            if (summary) {
-              setRunSummary(summary);
-              setProgress(prev => ({
-                ...prev,
-                pagesFound: Math.max(
-                  prev.pagesFound,
-                  summary.pagesFound ?? initialProgress.pagesFound
-                ),
-                pageStatesFound: Math.max(
-                  prev.pageStatesFound,
-                  summary.pageStatesFound ?? initialProgress.pageStatesFound
-                ),
-                testRunsCompleted: Math.max(
-                  prev.testRunsCompleted,
-                  summary.testRunsCompleted ?? initialProgress.testRunsCompleted
-                ),
-                aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
-                status_update:
-                  summary.status_update ?? prev.status_update ?? null,
-                expertiseSummary:
-                  Object.keys(summary.expertiseSummary ?? {}).length > 0
-                    ? Object.fromEntries(
-                        Object.entries(summary.expertiseSummary).map(
-                          ([name, counts]) => [
-                            name,
-                            {
-                              warnings: counts.warnings,
-                              errors: counts.errors,
-                            },
-                          ]
-                        )
-                      )
-                    : (prev.expertiseSummary ?? null),
-              }));
-            }
-
-            if (Array.isArray(pages)) {
-              setRunPageSummaries(pages);
-              setProgress(prev => ({
-                ...prev,
-                pagesFound: Math.max(prev.pagesFound, pages.length),
-                pageStatesFound: Math.max(
-                  prev.pageStatesFound,
-                  pages.reduce(
-                    (total, page) => total + (page.pageStatesCount ?? 0),
-                    0
-                  )
-                ),
-                testRunsCompleted: Math.max(
-                  prev.testRunsCompleted,
-                  pages.reduce(
-                    (total, page) =>
-                      total + (page.testInteractionRunsCount ?? 0),
-                    0
-                  )
-                ),
-                findingsFound: Math.max(
-                  prev.findingsFound,
-                  pages.reduce((total, page) => total + (page.errors ?? 0), 0)
-                ),
-              }));
-            }
-
-            if (navigationMap) {
-              setNavigationMap(navigationMap);
-            }
-
-            if (structure) {
-              setRunStructure(structure);
-            }
-          }
-        )
-        .catch(err =>
-          logPanel('fetch-live-data:failed', {
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-
-    void fetchLiveData();
-
-    if (progress.isComplete || progress.phase === 'completed') {
-      return () => {
-        cancelled = true;
-      };
+  // Live dashboard polling via React Query (replaces the manual fetch loop).
+  // staleTime defaults keep refetches cheap; refetchInterval stops on complete.
+  const liveDashboardQuery = useRunLiveDashboard(
+    networkClient,
+    tmBaseUrl,
+    token ?? '',
+    progress.scanId ?? 0,
+    {
+      enabled: !!token && !!progress.scanId,
+      refetchInterval:
+        progress.isComplete || progress.phase === 'completed' ? false : 3000,
     }
-
-    // Use sequential polling: wait for previous request to complete
-    // before starting the next one, preventing request pile-up when
-    // the dashboard response is slow
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const pollAfterDelay = () => {
-      timeoutId = setTimeout(async () => {
-        if (cancelled) return;
-        await fetchLiveData();
-        if (!cancelled) pollAfterDelay();
-      }, 3000);
-    };
-    pollAfterDelay();
-
-    return () => {
-      cancelled = true;
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [token, progress.scanId, progress.isComplete, progress.phase]);
-
-  // Load scenarios when switching to scenarios tab
-  const fetchScenarios = useCallback(async () => {
-    const runnerId = runSummary?.runnerId;
-    if (!token || !runnerId) return;
-    setLoadingScenarios(true);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/v1/runners/${runnerId}/test-scenarios`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const json = await res.json();
-      if (json.success) setScenarios(json.data ?? []);
-    } catch {
-      // ignore
-    } finally {
-      setLoadingScenarios(false);
-    }
-  }, [token, runSummary?.runnerId]);
+  );
+  const liveDashboardData = liveDashboardQuery.data?.data ?? null;
 
   useEffect(() => {
-    if (appView === 'scenarios') void fetchScenarios();
+    if (!liveDashboardData) return;
+    // The endpoint shape matches these SidePanel-local types exactly; the
+    // client types it with its own equivalents, so narrow via a cast.
+    const {
+      summary,
+      pagesSummary: pages,
+      navigationMap,
+      structure,
+    } = liveDashboardData as unknown as {
+      summary: RunSummary;
+      pagesSummary: RunPageSummary[];
+      navigationMap: NavigationMapData;
+      structure: RunStructureData | null;
+    };
+
+    if (summary) {
+      setRunSummary(summary);
+      setProgress(prev => ({
+        ...prev,
+        pagesFound: Math.max(
+          prev.pagesFound,
+          summary.pagesFound ?? initialProgress.pagesFound
+        ),
+        pageStatesFound: Math.max(
+          prev.pageStatesFound,
+          summary.pageStatesFound ?? initialProgress.pageStatesFound
+        ),
+        testRunsCompleted: Math.max(
+          prev.testRunsCompleted,
+          summary.testRunsCompleted ?? initialProgress.testRunsCompleted
+        ),
+        aiSummary: summary.aiSummary ?? prev.aiSummary ?? null,
+        status_update: summary.status_update ?? prev.status_update ?? null,
+        expertiseSummary:
+          Object.keys(summary.expertiseSummary ?? {}).length > 0
+            ? Object.fromEntries(
+                Object.entries(summary.expertiseSummary).map(
+                  ([name, counts]) => [
+                    name,
+                    {
+                      warnings: counts.warnings,
+                      errors: counts.errors,
+                    },
+                  ]
+                )
+              )
+            : (prev.expertiseSummary ?? null),
+      }));
+    }
+
+    if (Array.isArray(pages)) {
+      setRunPageSummaries(pages);
+      setProgress(prev => ({
+        ...prev,
+        pagesFound: Math.max(prev.pagesFound, pages.length),
+        pageStatesFound: Math.max(
+          prev.pageStatesFound,
+          pages.reduce((total, page) => total + (page.pageStatesCount ?? 0), 0)
+        ),
+        testRunsCompleted: Math.max(
+          prev.testRunsCompleted,
+          pages.reduce(
+            (total, page) => total + (page.testInteractionRunsCount ?? 0),
+            0
+          )
+        ),
+        findingsFound: Math.max(
+          prev.findingsFound,
+          pages.reduce((total, page) => total + (page.errors ?? 0), 0)
+        ),
+      }));
+    }
+
+    if (navigationMap) {
+      setNavigationMap(navigationMap);
+    }
+
+    if (structure) {
+      setRunStructure(structure);
+    }
+  }, [liveDashboardData]);
+
+  // Refresh scenarios when switching to the scenarios tab.
+  useEffect(() => {
+    if (appView === 'scenarios') fetchScenarios();
   }, [appView, fetchScenarios]);
 
   // Fetch scenarios when scan completes
@@ -2647,6 +2509,7 @@ export function SidePanel() {
             scenario={selectedScenario}
             token={token ?? ''}
             apiUrl={API_URL}
+            networkClient={networkClient}
             testEnvironmentId={runSummary?.testEnvironmentId ?? null}
             scenarioProgress={scenarioProgress}
             onBack={() => {
@@ -2669,6 +2532,7 @@ export function SidePanel() {
             loading={loadingScenarios}
             token={token ?? ''}
             apiUrl={API_URL}
+            networkClient={networkClient}
             runnerId={runSummary?.runnerId ?? 0}
             productId={Number(selectedProductId) || 0}
             testEnvironmentId={runSummary?.testEnvironmentId ?? null}

@@ -1,4 +1,10 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import type { NetworkClient } from '@sudobility/types';
+import {
+  useTestScenarioSequences,
+  useTestScenarioSequenceTestInteractions,
+  useGenerateSequence,
+} from '@sudobility/testomniac_client';
 
 interface ScenarioItem {
   id: number;
@@ -32,6 +38,7 @@ interface ScenarioDetailViewProps {
   scenario: ScenarioItem;
   token: string;
   apiUrl: string;
+  networkClient: NetworkClient;
   testEnvironmentId: number | null;
   scenarioProgress: ScenarioProgress | null;
   onBack: () => void;
@@ -43,91 +50,90 @@ export function ScenarioDetailView({
   scenario,
   token,
   apiUrl,
+  networkClient,
   testEnvironmentId,
   scenarioProgress,
   onBack,
   onRun,
   onStop,
 }: ScenarioDetailViewProps) {
-  const [interactions, setInteractions] = useState<SequenceInteraction[]>([]);
-  const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [showPrompt, setShowPrompt] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [genError, setGenError] = useState<string | null>(null);
 
-  const headers = useMemo(
-    () => ({
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    }),
-    [token]
+  const baseUrl = `${apiUrl}/api/v1`;
+
+  // Sequences for this scenario; the interactions hang off the latest one.
+  const sequencesQuery = useTestScenarioSequences(
+    networkClient,
+    baseUrl,
+    token,
+    scenario.id
+  );
+  const sequences = sequencesQuery.data?.data ?? [];
+  const loadingSequences = sequencesQuery.isLoading;
+  const sequencesError = sequencesQuery.error?.message ?? null;
+  const refetchSequences = sequencesQuery.refetch;
+  const latestSequence =
+    sequences.length > 0 ? sequences[sequences.length - 1] : null;
+
+  const interactionsQuery = useTestScenarioSequenceTestInteractions(
+    networkClient,
+    baseUrl,
+    token,
+    latestSequence?.id ?? 0,
+    { enabled: latestSequence != null }
+  );
+  const testInteractionLinksData = interactionsQuery.data?.data;
+  const loadingInteractions = interactionsQuery.isLoading;
+  const interactionsError = interactionsQuery.error?.message ?? null;
+  const refetchInteractions = interactionsQuery.refetch;
+
+  const interactions: SequenceInteraction[] = useMemo(
+    () =>
+      [...(testInteractionLinksData ?? [])].sort(
+        (a, b) => a.stepOrder - b.stepOrder
+      ) as unknown as SequenceInteraction[],
+    [testInteractionLinksData]
   );
 
-  const fetchInteractions = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const seqRes = await fetch(
-        `${apiUrl}/api/v1/test-scenarios/${scenario.id}/sequences`,
-        { headers }
-      );
-      const seqJson = await seqRes.json();
-      if (!seqJson.success || !seqJson.data?.length) {
-        setInteractions([]);
-        return;
-      }
-      const latestSeq = seqJson.data[seqJson.data.length - 1];
-      const intRes = await fetch(
-        `${apiUrl}/api/v1/test-scenarios/sequences/${latestSeq.id}/test-interactions`,
-        { headers }
-      );
-      const intJson = await intRes.json();
-      if (intJson.success && Array.isArray(intJson.data)) {
-        const sorted = [...intJson.data].sort(
-          (a: SequenceInteraction, b: SequenceInteraction) =>
-            a.stepOrder - b.stepOrder
-        );
-        setInteractions(sorted);
-      }
-    } catch {
-      setError('Failed to load interactions');
-    } finally {
-      setLoading(false);
-    }
-  }, [apiUrl, scenario.id, headers]);
+  const loading = loadingSequences || loadingInteractions;
+  const error = genError ?? sequencesError ?? interactionsError;
 
-  useEffect(() => {
-    void fetchInteractions();
-  }, [fetchInteractions]);
+  const generateSequenceMutation = useGenerateSequence(networkClient, baseUrl);
 
   const handleGenerate = useCallback(async () => {
     if (!testEnvironmentId) {
-      setError('No environment available');
+      setGenError('No environment available');
       return;
     }
     setGenerating(true);
-    setError(null);
+    setGenError(null);
     try {
-      const res = await fetch(
-        `${apiUrl}/api/v1/test-scenarios/${scenario.id}/generate-sequence`,
-        {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ testEnvironmentId }),
-        }
-      );
-      const json = await res.json();
+      const json = await generateSequenceMutation.mutateAsync({
+        token,
+        scenarioId: scenario.id,
+        data: { testEnvironmentId },
+      });
       if (!json.success) {
-        setError(json.error ?? 'Generation failed');
+        setGenError(json.error ?? 'Generation failed');
         return;
       }
-      await fetchInteractions();
+      await refetchSequences();
+      await refetchInteractions();
     } catch {
-      setError('Failed to generate sequence');
+      setGenError('Failed to generate sequence');
     } finally {
       setGenerating(false);
     }
-  }, [apiUrl, scenario.id, testEnvironmentId, headers, fetchInteractions]);
+  }, [
+    scenario.id,
+    testEnvironmentId,
+    token,
+    generateSequenceMutation,
+    refetchSequences,
+    refetchInteractions,
+  ]);
 
   const isRunning = scenarioProgress?.status === 'running';
 
