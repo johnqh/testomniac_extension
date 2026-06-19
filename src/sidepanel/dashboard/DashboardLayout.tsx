@@ -16,12 +16,9 @@ export function DashboardLayout() {
         masterWidth={240}
         mobileView={mobileView}
         onBackToNavigation={() => setMobileView('navigation')}
+        enableAnimations={false}
         masterContent={<DashboardSidebar entitySlug={entitySlug || ''} />}
-        detailContent={
-          <div className='min-h-[400px] overflow-y-auto'>
-            <Outlet />
-          </div>
-        }
+        detailContent={<Outlet />}
       />
     </UiRoute>
   );

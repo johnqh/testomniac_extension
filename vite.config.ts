@@ -64,6 +64,8 @@ export default defineConfig(({ mode }) => {
         'firebase/auth',
         '@sudobility/testomniac_runner_service',
       ],
+      // Serve the local file: linked dashboard library live (no stale pre-bundle).
+      exclude: ['@sudobility/testomniac_ui'],
     },
     server: {
       port: CRX_PORT,
