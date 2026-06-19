@@ -625,6 +625,15 @@ export function SidePanel() {
   const [selectedEntityId, setSelectedEntityId] = useState<string | null>(null);
   const selectedEntity = entities.find(e => e.id === selectedEntityId) ?? null;
 
+  // The embedded dashboard defaults to the user's personal workspace; its own
+  // Workspace selector lets the user switch from there.
+  const dashboardEntitySlug =
+    (
+      entities.find(e => (e.entityType as string) === 'personal') ??
+      selectedEntity ??
+      entities[0]
+    )?.entitySlug ?? '';
+
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
 
@@ -2497,9 +2506,7 @@ export function SidePanel() {
               networkClient={networkClient}
               token={token ?? ''}
               apiUrl={API_URL}
-              entitySlug={
-                entities.find(e => e.id === selectedEntityId)?.entitySlug ?? ''
-              }
+              entitySlug={dashboardEntitySlug}
             />
           </div>
         </div>
