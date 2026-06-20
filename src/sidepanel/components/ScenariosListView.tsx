@@ -53,7 +53,9 @@ export function ScenariosListView({
   const [detecting, setDetecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const baseUrl = `${apiUrl}/api/v1`;
+  // testomniac_client builds its own `/api/v1/...` paths, so its base is the
+  // origin (apiUrl), not `${apiUrl}/api/v1` (which would double-prefix).
+  const baseUrl = apiUrl;
   const createTestScenarioMutation = useCreateTestScenario(
     networkClient,
     baseUrl

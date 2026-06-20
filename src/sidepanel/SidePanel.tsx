@@ -608,15 +608,21 @@ export function SidePanel() {
       });
   }, [showSettings]);
 
-  // Entity & product selection
-  const tmBaseUrl = `${API_URL}/api/v1`;
+  // Entity & product selection.
+  // NOTE: the two client libraries use OPPOSITE baseUrl conventions —
+  // testomniac_client methods build `/api/v1/...` paths themselves (so its base
+  // is the origin), while entity_client appends `/entities` (so its base
+  // includes `/api/v1`). Passing the same value to both double-prefixes
+  // testomniac_client and 404s every call (empty products, scan, etc.).
+  const tmBaseUrl = API_URL;
+  const entityBaseUrl = `${API_URL}/api/v1`;
   const tmClient = useMemo(
     () => new TestomniacClient(networkClient, tmBaseUrl),
     [tmBaseUrl, networkClient]
   );
   const entityClient = useMemo(
-    () => new EntityClient({ baseUrl: tmBaseUrl, networkClient }),
-    [tmBaseUrl, networkClient]
+    () => new EntityClient({ baseUrl: entityBaseUrl, networkClient }),
+    [entityBaseUrl, networkClient]
   );
   const { data: entities = [], isLoading: loadingEntities } = useEntities(
     entityClient,

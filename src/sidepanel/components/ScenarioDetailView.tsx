@@ -61,7 +61,9 @@ export function ScenarioDetailView({
   const [showPrompt, setShowPrompt] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
 
-  const baseUrl = `${apiUrl}/api/v1`;
+  // testomniac_client builds its own `/api/v1/...` paths, so its base is the
+  // origin (apiUrl), not `${apiUrl}/api/v1` (which would double-prefix).
+  const baseUrl = apiUrl;
 
   // Sequences for this scenario; the interactions hang off the latest one.
   const sequencesQuery = useTestScenarioSequences(
