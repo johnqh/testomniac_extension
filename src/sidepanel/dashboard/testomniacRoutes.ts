@@ -20,6 +20,7 @@ export const testomniacRoutes: TestomniacRoutes = {
 
   environment: (s, e) => env(s, e),
 
+  status: (s, e) => `${env(s, e)}/status`,
   bundles: (s, e) => `${env(s, e)}/bundles`,
   bundle: (s, e, bundleId) => `${env(s, e)}/bundles/${bundleId}`,
   testSurfaces: (s, e) => `${env(s, e)}/test-surfaces`,

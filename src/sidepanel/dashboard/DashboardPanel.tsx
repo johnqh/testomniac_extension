@@ -28,6 +28,7 @@ import {
   TestScenariosPage,
   TestScenarioDetailPage,
   ScanProgressPage,
+  StatusPage,
   BundlesPage,
   BundleDetailPage,
 } from '@sudobility/testomniac_ui';
@@ -70,6 +71,10 @@ export function DashboardPanel({
             <Route index element={ui(<DashboardOverview />)} />
             <Route path='scan/new' element={ui(<StartScanPage />)} />
 
+            <Route
+              path='environments/:envId/status'
+              element={ui(<StatusPage />)}
+            />
             <Route
               path='environments/:envId/bundles'
               element={ui(<BundlesPage />)}
