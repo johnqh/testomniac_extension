@@ -43,6 +43,7 @@ function useSyncExternalStoreWithSelector<Snapshot, Selection>(
           inst.value !== null &&
           isEqual(inst.value, nextSelection)
         ) {
+          // eslint-disable-next-line react-hooks/immutability -- vendored React useSyncExternalStoreWithSelector shim; intentional memo cache assignment
           memoizedSelection = inst.value;
           return inst.value;
         }
