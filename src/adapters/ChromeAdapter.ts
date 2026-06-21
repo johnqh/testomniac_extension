@@ -3,6 +3,7 @@ import {
   NetworkIdleTracker,
   waitForNetworkIdle,
 } from '@sudobility/testomniac_runner_service';
+import { collectPageSnapshot } from './collectPageSnapshot';
 
 const REPLAY_SELECTOR_PREFIX = 'tmnc-replay:';
 
@@ -596,13 +597,25 @@ export class ChromeAdapter implements BrowserAdapter {
     return result?.result as T;
   }
 
-  async content(): Promise<string> {
+  /**
+   * Single-round-trip page read: html + body text length in one injection.
+   * runner_service's readPageHtml() prefers this over content() when present,
+   * collapsing the per-interaction decomposition read to one executeScript.
+   */
+  async capturePageSnapshot(): Promise<{
+    html: string;
+    bodyTextLength: number;
+  }> {
     await this.ensureAccessiblePage();
     const [result] = await chrome.scripting.executeScript({
       target: { tabId: this.tabId },
-      func: () => document.documentElement.outerHTML,
+      func: collectPageSnapshot,
     });
-    return result?.result || '';
+    return result?.result ?? { html: '', bodyTextLength: 0 };
+  }
+
+  async content(): Promise<string> {
+    return (await this.capturePageSnapshot()).html;
   }
 
   async getUrl(): Promise<string> {
