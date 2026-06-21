@@ -51,6 +51,14 @@ export default defineConfig(({ mode }) => {
           __dirname,
           './src/shims/subscription-lib.ts'
         ),
+        'use-sync-external-store/shim/with-selector.js': path.resolve(
+          __dirname,
+          './src/shims/use-sync-external-store-with-selector.ts'
+        ),
+        'use-sync-external-store/shim/with-selector': path.resolve(
+          __dirname,
+          './src/shims/use-sync-external-store-with-selector.ts'
+        ),
       },
       dedupe: ['react', 'react-dom', 'firebase/app', 'firebase/auth'],
     },
