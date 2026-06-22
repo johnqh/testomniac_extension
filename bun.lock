@@ -14,11 +14,11 @@
         "@sudobility/di": "^1.5.58",
         "@sudobility/di_web": "^0.1.198",
         "@sudobility/entity_client": "^0.0.36",
-        "@sudobility/testomniac_client": "^0.0.104",
-        "@sudobility/testomniac_lib": "^0.0.112",
+        "@sudobility/testomniac_client": "^0.0.105",
+        "@sudobility/testomniac_lib": "^0.0.113",
         "@sudobility/testomniac_runner_service": "^0.1.161",
-        "@sudobility/testomniac_types": "^0.0.79",
-        "@sudobility/testomniac_ui": "^0.0.12",
+        "@sudobility/testomniac_types": "^0.0.80",
+        "@sudobility/testomniac_ui": "^0.0.13",
         "@sudobility/types": "^1.9.62",
         "@tanstack/react-query": "^5.90.5",
         "@tanstack/react-table": "^8.21.3",
@@ -494,15 +494,15 @@
 
     "@sudobility/entity_client": ["@sudobility/entity_client@0.0.36", "", { "peerDependencies": { "@sudobility/types": "^1.9.62", "@tanstack/react-query": "^5.0.0", "react": "^18.0.0 || ^19.0.0" } }, "sha512-ksYFQnC4t/SqGasf5ImYrxD2L/kSxnFkex1KOGUchd8NXi9M9RUQB2AwvYuF1JpgXpk5JF/ueJohU9IVpVatwA=="],
 
-    "@sudobility/testomniac_client": ["@sudobility/testomniac_client@0.0.104", "", { "peerDependencies": { "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0" } }, "sha512-gjCtpkxA0gJHhhahDxXBLL3Dto9PZTEypkg4zU41epawEnOIAQwOuy4irGgRQwsdAEz3lqtJCfLl4Uwci4OjWQ=="],
+    "@sudobility/testomniac_client": ["@sudobility/testomniac_client@0.0.105", "", { "peerDependencies": { "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0" } }, "sha512-BQ8Z4lqj1EP1CqEJb0un8L8E3v2auVxUQbZtlI7d6wt98YDlqQ5PTm3VT136vkjVZGUBIkCMB4dbHY/MLuBVFw=="],
 
-    "@sudobility/testomniac_lib": ["@sudobility/testomniac_lib@0.0.112", "", { "dependencies": { "dagre": "^0.8.5" }, "peerDependencies": { "@sudobility/testomniac_client": "^0.0.104", "@sudobility/testomniac_types": "^0.0.79", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0", "zustand": ">=5.0.0" } }, "sha512-30vkC3Tgqs94t8p7Z2Vv2U1/MU8bY5zSZ8pNBubpVOh/UYuSMy10RzoMQ/qA+xNhyQZnee/qhv9Dw+ZuTJZpKA=="],
+    "@sudobility/testomniac_lib": ["@sudobility/testomniac_lib@0.0.113", "", { "dependencies": { "dagre": "^0.8.5" }, "peerDependencies": { "@sudobility/testomniac_client": "^0.0.105", "@sudobility/testomniac_types": "^0.0.80", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "react": ">=18.0.0", "zustand": ">=5.0.0" } }, "sha512-mprcb36ebjyE3vaJV49lrDBSXKKQso39uXQ9oxwNy9mrh8C/0EU50CwCNAXj8kkot8FA0UFa1/cP91zl5OzTHw=="],
 
     "@sudobility/testomniac_runner_service": ["@sudobility/testomniac_runner_service@0.1.161", "", { "peerDependencies": { "@sudobility/testomniac_types": "^0.0.79" } }, "sha512-oHHemCEfr6v21tiA+oxRDuRUgLChFDNMNT4l2KZNPU+KGYYP0GsqO7VRgVcXMtVYxw/e3f3/HPyMr/LAR5gjhg=="],
 
-    "@sudobility/testomniac_types": ["@sudobility/testomniac_types@0.0.79", "", { "peerDependencies": { "@sudobility/types": "^1.9.62" } }, "sha512-rM1pouAgBlMZ/9fH1Za1yh2dOk4F5UokWxzBgFuHJqdTwmjowH/3AvhmFvzw5gmakpjvt9hFi2Yb3QF0dqfn/Q=="],
+    "@sudobility/testomniac_types": ["@sudobility/testomniac_types@0.0.80", "", { "peerDependencies": { "@sudobility/types": "^1.9.62" } }, "sha512-BugxR1yC5pSN97lN+bMz+mD87or+7dNHX+Qsof2QQHrYszPpuKjWNTYwQW2wma7ekUqWgykOU3iNDq+wC0KNQw=="],
 
-    "@sudobility/testomniac_ui": ["@sudobility/testomniac_ui@0.0.12", "", { "peerDependencies": { "@heroicons/react": ">=2.0.0", "@sudobility/components": "^5.0.82", "@sudobility/design": "^1.1.32", "@sudobility/testomniac_client": "^0.0.104", "@sudobility/testomniac_lib": "^0.0.112", "@sudobility/testomniac_types": "^0.0.79", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "@tanstack/react-table": ">=8.0.0", "@xyflow/react": ">=12.0.0", "react": ">=18.0.0", "react-dom": ">=18.0.0" } }, "sha512-gV9yN7X28JGpXm2SQexFzKFmwz7y++8g1e+hHDcV9z1jUFaZ6WKPnc8fRX2MIzS6ziuuVBZSsZKVIBYZH3GTyg=="],
+    "@sudobility/testomniac_ui": ["@sudobility/testomniac_ui@0.0.13", "", { "peerDependencies": { "@heroicons/react": ">=2.0.0", "@sudobility/components": "^5.0.82", "@sudobility/design": "^1.1.32", "@sudobility/testomniac_client": "^0.0.105", "@sudobility/testomniac_lib": "^0.0.113", "@sudobility/testomniac_types": "^0.0.80", "@sudobility/types": "^1.9.62", "@tanstack/react-query": ">=5.0.0", "@tanstack/react-table": ">=8.0.0", "@xyflow/react": ">=12.0.0", "react": ">=18.0.0", "react-dom": ">=18.0.0" } }, "sha512-d8d4h5ZZSTzrA+PZWMWpaDVf3Kf9OLSTWAjsLw/xBaGSfsR7cAdri5hvGXYLiZ7pBWxhDlcALr06NmHk2FFy4w=="],
 
     "@sudobility/types": ["@sudobility/types@1.9.62", "", {}, "sha512-GOkz5oE7Fmlolba2aemBF2fKPtH4I2lHAjVta+fqZAoAV72DQaWYzVEjTwKZs/ACY/g9Z262IDa7lEh+IOrn7w=="],
 
