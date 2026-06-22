@@ -1268,7 +1268,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     scanState.isRunning = false;
     scanState.isComplete = true;
     scanState.phase = 'stopped';
-    stopKeepalive();
+    // Do NOT stop keepalive yet: the in-flight runTestRun() still has to call
+    // /scan/end for server-side closeout after the abort propagates. Killing
+    // keepalive now lets the MV3 service worker suspend mid-closeout. The
+    // detached run is tracked by activeRunPromise, and runScanSession()'s
+    // finally stops keepalive once it settles — so we hand off to that. Only
+    // stop now if nothing is in flight (otherwise the worker is pinned forever).
+    if (activeRunPromise) {
+      void activeRunPromise.finally(() => stopKeepalive());
+    } else {
+      stopKeepalive();
+    }
     addEvent('stopped', 'Scan stopped by user');
     void flushAll().then(() => {
       sendResponse({ ok: true });
