@@ -1275,7 +1275,10 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     // finally stops keepalive once it settles — so we hand off to that. Only
     // stop now if nothing is in flight (otherwise the worker is pinned forever).
     if (activeRunPromise) {
-      void activeRunPromise.finally(() => stopKeepalive());
+      // .catch swallows a rejected run: finally() re-raises the original
+      // rejection, which would otherwise be an unhandled promise rejection here
+      // (the run's own handling already reported the error).
+      void activeRunPromise.finally(() => stopKeepalive()).catch(() => {});
     } else {
       stopKeepalive();
     }
