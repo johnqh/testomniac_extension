@@ -16,7 +16,7 @@
         "@sudobility/entity_client": "^0.0.36",
         "@sudobility/testomniac_client": "^0.0.106",
         "@sudobility/testomniac_lib": "^0.0.114",
-        "@sudobility/testomniac_runner_service": "^0.1.169",
+        "@sudobility/testomniac_runner_service": "^0.1.170",
         "@sudobility/testomniac_types": "^0.0.81",
         "@sudobility/testomniac_ui": "^0.0.14",
         "@sudobility/types": "^1.9.62",
