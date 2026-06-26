@@ -193,6 +193,7 @@ function createDedupApiClient(baseUrl: string, key: string): ApiClient {
         testRunId: params.testRunId,
         path: params.path ?? null,
         expertiseRuleId: null,
+        expertiseId: null,
         ruleId: params.ruleId ?? null,
         type: params.type,
         priority: params.priority,
